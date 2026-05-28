@@ -9,6 +9,12 @@ doctest = false
 name = "codex_otel"
 path = "src/lib.rs"
 
+[features]
+default = []
+# Enable the built-in Statsig metrics exporter that ships traces to OpenAI.
+# Off by default in Fraktal builds.
+openai-telemetry = []
+
 [lints]
 workspace = true
 

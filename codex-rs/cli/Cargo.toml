@@ -7,7 +7,7 @@ build = "build.rs"
 default-run = "codex"
 
 [[bin]]
-name = "codex"
+name = "fraktal"
 path = "src/main.rs"
 
 [[bin]]

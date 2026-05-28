@@ -23,6 +23,10 @@ concurrency:
 
 jobs:
   tag-check:
+    # Fraktal fork: every downstream job needs tag-check, so gating it here
+    # skips the whole release pipeline on forks. Restore by removing this `if`
+    # (or repointing to the fork) once we have our own publish credentials.
+    if: github.repository == 'openai/codex'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

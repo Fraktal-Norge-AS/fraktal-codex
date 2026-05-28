@@ -13,11 +13,10 @@ pub(crate) const STATSIG_API_KEY: &str = "client-MkRuleRQBd6qakfnDYqJVR9JuXcY57L
 pub(crate) fn resolve_exporter(exporter: &OtelExporter) -> OtelExporter {
     match exporter {
         OtelExporter::Statsig => {
-            // Keep the built-in Statsig default off in debug builds so
-            // incremental local development and test runs do not emit
-            // best-effort OTEL traffic unless a test or binary opts into an
-            // explicit exporter configuration.
-            if cfg!(debug_assertions) {
+            // Default to off in debug builds and in Fraktal builds that do not
+            // opt into the `openai-telemetry` feature, so internal binaries
+            // never emit metrics to OpenAI's Statsig endpoint.
+            if cfg!(debug_assertions) || !cfg!(feature = "openai-telemetry") {
                 return OtelExporter::None;
             }
 
