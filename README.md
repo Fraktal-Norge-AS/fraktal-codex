@@ -104,7 +104,63 @@ command = "fraktal-auth"
 args = ["token", "--scope", "https://cognitiveservices.azure.com/.default"]
 refresh_interval_ms = 300000
 timeout_ms = 10000
+
+# Bytt til DeepInfra med: fraktal --profile deepinfra
+# Krever en oversetter-proxy (se under) fordi Codex kun snakker
+# Responses-API-et, mens DeepInfra kun tilbyr Chat Completions.
+[profiles.deepinfra]
+model_provider = "fraktal-deepinfra"
+model = "kimi-k2-code"               # model_name definert i LiteLLM-proxyen
+
+[model_providers.fraktal-deepinfra]
+name = "DeepInfra (via LiteLLM-proxy)"
+base_url = "http://localhost:4000/v1"   # LiteLLM-proxyens /v1/responses
+wire_api = "responses"
+requires_openai_auth = false
+# Nøkkelen Fraktal sender til proxyen. Lokalt uten proxy-auth kan denne
+# linjen droppes; i delt drift settes LiteLLMs master key her.
+env_key = "LITELLM_MASTER_KEY"
 ```
+
+### DeepInfra via oversetter-proxy
+
+DeepInfra eksponerer kun Chat Completions
+(`https://api.deepinfra.com/v1/openai`), mens Codex/Fraktal utelukkende
+snakker Responses-API-et (`wire_api = "responses"` er eneste gyldige
+verdi — oppstrøms fjernet `chat`, se
+[openai/codex#7782](https://github.com/openai/codex/discussions/7782)).
+Derfor kan ikke Fraktal treffe DeepInfra direkte. Løsningen er en
+[LiteLLM](https://docs.litellm.ai/docs/simple_proxy)-proxy som tilbyr et
+`/v1/responses`-endepunkt og oversetter til DeepInfras Chat Completions.
+
+`litellm_config.yaml`:
+
+```yaml
+model_list:
+  - model_name: kimi-k2-code
+    litellm_params:
+      model: deepinfra/moonshotai/Kimi-K2.7-Code
+      api_key: os.environ/DEEPINFRA_TOKEN
+```
+
+Start proxyen (lytter på `http://localhost:4000`):
+
+```sh
+export DEEPINFRA_TOKEN=...           # fra https://deepinfra.com/dash/api_keys
+pip install "litellm[proxy]"
+litellm --config litellm_config.yaml
+```
+
+Deretter:
+
+```sh
+fraktal --profile deepinfra "skriv en kort sammendrag av denne mappen"
+```
+
+NB: oversettelsen gir vanlig chat + tool-calling, men Responses-native
+funksjoner (server-side reasoning-items, kryptert reasoning, remote
+compaction) er ikke tilgjengelige bak proxyen. Det er greit for Kimi
+K2-Code, som ikke er en reasoning-modell i OpenAI-forstand.
 
 `ollama` og `lmstudio` finnes også som innebygde provider-ID-er i Codex,
 men de er låst til `localhost:11434` / `localhost:1234` og kan ikke
