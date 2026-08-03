@@ -81,6 +81,12 @@ til fork-endringene.
 - Renamed the Rust binary from `codex` to `fraktal`
   (`codex-rs/cli/Cargo.toml`, `clap` `bin_name` in
   `codex-rs/cli/src/main.rs`, npm wrapper bin entry and shim filename).
+- `fraktal --version` skriver nå `fraktal <versjon>` i stedet for
+  `codex-cli <versjon>` — `clap` bruker `name` (som defaulter til
+  crate-navnet), ikke `bin_name`, på versjonslinja. `--help` starter med
+  «Fraktal CLI». Wire-identifikatorer (`User-Agent`, `agent_harness_id`,
+  `SessionSource`) er bevisst uendret — de er protokollverdier, ikke
+  visningsnavn.
 - Repointed `doctor`'s update-check URL from `openai/codex` to
   `Fraktal-Norge-AS/fraktal-codex`. Updated brew/npm/bun labels.
 - Rebranded TUI splash text: welcome line and session/status card

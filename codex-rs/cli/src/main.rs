@@ -88,7 +88,7 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::user_input::UserInput;
 use codex_terminal_detection::TerminalName;
 
-/// Codex CLI
+/// Fraktal CLI
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
@@ -97,6 +97,10 @@ use codex_terminal_detection::TerminalName;
     version,
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
+    // `--version` prints `{name} {version}`, and `name` defaults to the crate
+    // name (`codex-cli`). Set it explicitly so the version line matches the
+    // command users actually run.
+    name = "fraktal",
     // The executable is sometimes invoked via a platform‑specific name like
     // `fraktal-x86_64-unknown-linux-musl`, but the help output should always use
     // the generic `fraktal` command name that users run.
