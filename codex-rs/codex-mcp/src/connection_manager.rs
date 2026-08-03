@@ -696,6 +696,64 @@ impl McpConnectionSet {
     }
 }
 
+/// Resolve a possibly-mangled MCP server name against a set of registered
+/// server keys.
+///
+/// Local/weak models often echo the server name as it appears in the flattened
+/// tool name (e.g. `mcp__wren_charts`) rather than the configured server id
+/// (e.g. `wren-charts`). When the exact lookup misses, match by canonical
+/// separator form, optionally stripping a leading `mcp` segment the model
+/// carried over from the tool-name prefix. Returns the matching key only when
+/// it is unique, so we never guess. Mirrors the tolerant tool-name resolution
+/// in `codex-core`.
+pub(crate) fn resolve_server_key<'a>(
+    requested: &str,
+    keys: impl Iterator<Item = &'a String>,
+) -> Option<String> {
+    let target = canonical_server_key(requested);
+    // Models often carry the `mcp` tool-name prefix into the server argument
+    // (`mcp__wren_charts` for a server registered as `wren-charts`); allow that
+    // leading segment to be dropped when matching.
+    let stripped = target.strip_prefix("mcp_").map(str::to_string);
+
+    let mut found: Option<&String> = None;
+    for key in keys {
+        if key == requested {
+            // An exact match always wins.
+            return Some(key.clone());
+        }
+        let canonical = canonical_server_key(key);
+        if canonical == target || Some(&canonical) == stripped.as_ref() {
+            if found.is_some() {
+                // Ambiguous: leave unresolved rather than guess.
+                return None;
+            }
+            found = Some(key);
+        }
+    }
+    found.cloned()
+}
+
+/// Collapse every run of MCP name separators (`.`, `:`, `-`, `_`, space) into a
+/// single `_` so that a model emitting `wren_charts` or `wren-charts` resolves
+/// to the same registered server. Mirrors `canonical_mcp_name` in `codex-core`.
+fn canonical_server_key(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut prev_sep = false;
+    for ch in name.chars() {
+        if matches!(ch, '.' | ':' | '-' | '_' | ' ') {
+            if !prev_sep {
+                out.push('_');
+                prev_sep = true;
+            }
+        } else {
+            out.push(ch);
+            prev_sep = false;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 #[path = "connection_manager_tests.rs"]
 mod tests;

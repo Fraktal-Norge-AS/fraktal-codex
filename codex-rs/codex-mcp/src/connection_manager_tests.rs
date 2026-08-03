@@ -4009,3 +4009,44 @@ async fn view_only_changes_reuse_connection_and_preserve_the_old_step() {
     );
     assert_eq!(new_call.tool_approval_mode(), AppToolApproval::Approve);
 }
+
+fn resolve(requested: &str, keys: &[&str]) -> Option<String> {
+    let owned: Vec<String> = keys.iter().map(|k| (*k).to_string()).collect();
+    resolve_server_key(requested, owned.iter())
+}
+
+#[test]
+fn resolve_server_key_prefers_exact_match() {
+    let keys = ["wren-charts", "other"];
+    assert_eq!(resolve("wren-charts", &keys).as_deref(), Some("wren-charts"));
+}
+
+#[test]
+fn resolve_server_key_matches_separator_variants() {
+    let keys = ["wren-charts"];
+    // Model echoed underscores instead of the configured hyphen.
+    assert_eq!(resolve("wren_charts", &keys).as_deref(), Some("wren-charts"));
+}
+
+#[test]
+fn resolve_server_key_strips_mcp_tool_prefix() {
+    let keys = ["wren-charts"];
+    // Model carried the `mcp__` tool-name prefix into the server argument.
+    assert_eq!(
+        resolve("mcp__wren_charts", &keys).as_deref(),
+        Some("wren-charts")
+    );
+}
+
+#[test]
+fn resolve_server_key_returns_none_when_unknown() {
+    let keys = ["wren-charts"];
+    assert_eq!(resolve("totally-different", &keys), None);
+}
+
+#[test]
+fn resolve_server_key_leaves_ambiguous_unresolved() {
+    // Both canonicalize to `a_b`; refuse to guess.
+    let keys = ["a-b", "a_b"];
+    assert_eq!(resolve("mcp__a__b", &keys), None);
+}

@@ -1,6 +1,7 @@
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ConfigShellToolType;
+use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelInstructionsVariables;
 use codex_protocol::openai_models::ModelMessages;
@@ -23,6 +24,17 @@ const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
+    // [fraktal] Strict local Responses bridges (llama.cpp) reject image content
+    // in tool outputs. When the model is declared text-only, drop Image so
+    // `strip_images_when_unsupported` converts such content to a placeholder.
+    if config.disable_image_inputs {
+        model
+            .input_modalities
+            .retain(|modality| *modality != InputModality::Image);
+        if model.input_modalities.is_empty() {
+            model.input_modalities.push(InputModality::Text);
+        }
+    }
     if let Some(context_window) = config.model_context_window {
         model.context_window = Some(
             model

@@ -513,6 +513,9 @@
             "deferred_tool_world_state": {
               "type": "boolean"
             },
+            "disable_image_inputs": {
+              "type": "boolean"
+            },
             "elevated_windows_sandbox": {
               "type": "boolean"
             },
@@ -550,6 +553,9 @@
               "type": "boolean"
             },
             "fast_mode": {
+              "type": "boolean"
+            },
+            "flatten_mcp_tools": {
               "type": "boolean"
             },
             "goals": {
@@ -5088,6 +5094,9 @@
         "deferred_tool_world_state": {
           "type": "boolean"
         },
+        "disable_image_inputs": {
+          "type": "boolean"
+        },
         "elevated_windows_sandbox": {
           "type": "boolean"
         },
@@ -5125,6 +5134,9 @@
           "type": "boolean"
         },
         "fast_mode": {
+          "type": "boolean"
+        },
+        "flatten_mcp_tools": {
           "type": "boolean"
         },
         "goals": {

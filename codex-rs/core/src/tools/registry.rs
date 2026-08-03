@@ -401,6 +401,34 @@ impl ToolRegistry {
         self.tools.get(name).map(|tool| Arc::clone(&tool.runtime))
     }
 
+    /// Resolve an MCP tool call whose name doesn't match exactly because the
+    /// model emitted a flattened or mis-separated `mcp__server__tool` name.
+    ///
+    /// Compares the canonical separator form (all of `. : - _` runs collapsed
+    /// to a single `_`) of the requested flat name against every registered
+    /// MCP tool. Returns the canonical registry key only when exactly one tool
+    /// matches; ambiguous matches are left unresolved so we never guess.
+    fn resolve_fuzzy_mcp_name(&self, requested: &ToolName) -> Option<ToolName> {
+        let target = canonical_tool_key(requested);
+        if !target.starts_with("mcp") {
+            return None;
+        }
+        let mut found: Option<&ToolName> = None;
+        for key in self.tools.keys() {
+            let canonical = canonical_tool_key(key);
+            if !canonical.starts_with("mcp") {
+                continue;
+            }
+            if canonical == target {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(key);
+            }
+        }
+        found.cloned()
+    }
+
     #[cfg(test)]
     pub(crate) fn tool_names_for_test(&self) -> Vec<ToolName> {
         let mut names = self.tools.keys().cloned().collect::<Vec<_>>();
@@ -439,6 +467,17 @@ impl ToolRegistry {
         mut invocation: ToolInvocation,
         terminal_outcome_reached: Option<Arc<AtomicBool>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
+        // Tolerate models that don't reproduce the exact `mcp__server__tool`
+        // wire name. Local models served via OpenAI-compatible chat-completions
+        // (e.g. Ollama) echo the tool as a *flat* function name with no separate
+        // namespace field, and weaker models mangle the `__` separator into `.`
+        // or `:`. When the exact lookup misses, resolve the call by canonical
+        // separator form so these still dispatch.
+        if self.tool(&invocation.tool_name).is_none()
+            && let Some(canonical) = self.resolve_fuzzy_mcp_name(&invocation.tool_name)
+        {
+            invocation.tool_name = canonical;
+        }
         let tool_name = invocation.tool_name.clone();
         let tool_name_flat = flat_tool_name(&tool_name);
         let call_id_owned = invocation.call_id.clone();
@@ -777,6 +816,46 @@ fn function_hook_tool_input(arguments: &str) -> Value {
     }
 
     serde_json::from_str(arguments).unwrap_or_else(|_| Value::String(arguments.to_string()))
+}
+
+/// Canonical comparison key for a [`ToolName`], collapsing the namespace/name
+/// boundary the same way the model-visible wire name does.
+///
+/// MCP tools register under a *namespaced* key (e.g. namespace `mcp__wren_charts`,
+/// name `list_models`) but the model sees them joined with `__`
+/// (`mcp__wren_charts__list_models`). `flat_tool_name` concatenates with no
+/// separator, so we re-insert the boundary here before canonicalizing. A flat
+/// call name with everything in `name` (the common Ollama / chat-completions
+/// case) canonicalizes to the same key.
+fn canonical_tool_key(name: &ToolName) -> String {
+    match name.namespace.as_deref() {
+        Some(namespace) => canonical_mcp_name(&format!(
+            "{}_{}",
+            namespace.trim_end_matches('_'),
+            name.name.trim_start_matches('_'),
+        )),
+        None => canonical_mcp_name(&name.name),
+    }
+}
+
+/// Collapse every run of MCP name separators (`.`, `:`, `-`, `_`, space) into a
+/// single `_` so that `mcp__srv__tool`, `mcp__srv.tool`, and `mcp__srv:tool`
+/// all canonicalize to the same key. Used for tolerant MCP tool resolution.
+fn canonical_mcp_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut prev_sep = false;
+    for ch in name.chars() {
+        if matches!(ch, '.' | ':' | '-' | '_' | ' ') {
+            if !prev_sep {
+                out.push('_');
+                prev_sep = true;
+            }
+        } else {
+            out.push(ch);
+            prev_sep = false;
+        }
+    }
+    out
 }
 
 fn unsupported_tool_call_message(payload: &ToolPayload, tool_name: &ToolName) -> String {

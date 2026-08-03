@@ -16,6 +16,7 @@ use tokio::task::JoinSet;
 use tracing::warn;
 
 use super::McpConnectionSet;
+use super::resolve_server_key;
 use crate::pagination::collect_paginated;
 use crate::rmcp_client::ManagedClient;
 
@@ -157,9 +158,12 @@ impl McpConnectionSet {
     }
 
     async fn client_by_name(&self, name: &str) -> Result<(ManagedClient, Option<Duration>)> {
+        // [fraktal] Tolerate models that echo a mangled server name (see
+        // `resolve_server_key`); fall back to the exact name when unresolved.
+        let resolved = resolve_server_key(name, self.servers.keys());
         let view = self
             .servers
-            .get(name)
+            .get(resolved.as_deref().unwrap_or(name))
             .ok_or_else(|| anyhow!("unknown MCP server '{name}'"))?;
         let client = view
             .connection

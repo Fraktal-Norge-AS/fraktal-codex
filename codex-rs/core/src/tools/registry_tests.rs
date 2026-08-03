@@ -629,3 +629,54 @@ fn test_invocation(
         },
     }
 }
+
+#[test]
+fn canonical_mcp_name_collapses_separators() {
+    // Flattened, dot, and colon variants all canonicalize to the same key.
+    let canonical = canonical_mcp_name("mcp__wren_charts__list_models");
+    assert_eq!(canonical_mcp_name("mcp__wren_charts.list_models"), canonical);
+    assert_eq!(canonical_mcp_name("mcp__wren_charts:list_models"), canonical);
+    assert_eq!(canonical_mcp_name("mcp__wren-charts__list_models"), canonical);
+}
+
+#[test]
+fn resolve_fuzzy_mcp_name_tolerates_flat_and_mangled_calls() {
+    // MCP tools register under a namespaced key; the model sees them joined
+    // with `__` (`mcp__wren_charts__list_models`).
+    let registered = codex_tools::ToolName::namespaced("mcp__wren_charts", "list_models");
+    let handler = Arc::new(TestHandler {
+        tool_name: registered.clone(),
+    }) as Arc<dyn CoreToolRuntime>;
+    let registry = ToolRegistry::new(HashMap::from([(registered.clone(), handler)]));
+
+    // gemma: correct name but flattened into `name` with no namespace field.
+    let flat = codex_tools::ToolName::plain("mcp__wren_charts__list_models");
+    assert_eq!(registry.resolve_fuzzy_mcp_name(&flat), Some(registered.clone()));
+
+    // qwen: separator mangled to `.` / `:`.
+    let dotted = codex_tools::ToolName::plain("mcp__wren_charts.list_models");
+    assert_eq!(registry.resolve_fuzzy_mcp_name(&dotted), Some(registered.clone()));
+    let coloned = codex_tools::ToolName::plain("mcp__wren_charts:list_models");
+    assert_eq!(registry.resolve_fuzzy_mcp_name(&coloned), Some(registered.clone()));
+
+    // Non-MCP names are never fuzzy-resolved.
+    let builtin = codex_tools::ToolName::plain("shell_command");
+    assert_eq!(registry.resolve_fuzzy_mcp_name(&builtin), None);
+}
+
+#[test]
+fn resolve_fuzzy_mcp_name_declines_ambiguous_matches() {
+    // Two distinct tools that canonicalize identically must not be guessed.
+    let a = codex_tools::ToolName::namespaced("mcp__srv__", "do_it");
+    let b = codex_tools::ToolName::namespaced("mcp__srv__", "do__it");
+    let ha = Arc::new(TestHandler {
+        tool_name: a.clone(),
+    }) as Arc<dyn CoreToolRuntime>;
+    let hb = Arc::new(TestHandler {
+        tool_name: b.clone(),
+    }) as Arc<dyn CoreToolRuntime>;
+    let registry = ToolRegistry::new(HashMap::from([(a, ha), (b, hb)]));
+
+    let mangled = codex_tools::ToolName::plain("mcp__srv.do.it");
+    assert_eq!(registry.resolve_fuzzy_mcp_name(&mangled), None);
+}

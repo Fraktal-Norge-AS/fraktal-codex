@@ -2226,3 +2226,93 @@ async fn hosted_web_search_and_standalone_image_generation_follow_runtime_gates(
     .await;
     unsupported_provider.assert_visible_lacks(&["web_search"]);
 }
+
+fn mcp_namespace_spec() -> ToolSpec {
+    ToolSpec::Namespace(codex_tools::ResponsesApiNamespace {
+        name: "mcp__wren_charts".to_string(),
+        description: "Wren charts tools.".to_string(),
+        tools: vec![
+            ResponsesApiNamespaceTool::Function(ResponsesApiTool {
+                name: "list_models".to_string(),
+                description: "List Wren models.".to_string(),
+                strict: false,
+                defer_loading: None,
+                parameters: codex_tools::JsonSchema::default(),
+                output_schema: None,
+            }),
+            ResponsesApiNamespaceTool::Function(ResponsesApiTool {
+                name: "run_sql".to_string(),
+                description: "Run SQL.".to_string(),
+                strict: false,
+                defer_loading: None,
+                parameters: codex_tools::JsonSchema::default(),
+                output_schema: None,
+            }),
+        ],
+    })
+}
+
+#[tokio::test]
+async fn flatten_mcp_tools_exposes_flat_functions_end_to_end() {
+    // [fraktal] With FlattenMcpTools on, MCP tools must reach the model as flat
+    // `mcp__server__tool` functions (not a `type: "namespace"` tool) so local /
+    // chat-completions models can call them.
+    let flattened = probe_with(
+        |turn| set_feature(turn, Feature::FlattenMcpTools, /*enabled*/ true),
+        ToolPlanInputs {
+            mcp_tools: Some(vec![mcp_tool("direct", "mcp__direct", "lookup")]),
+            ..ToolPlanInputs::default()
+        },
+    )
+    .await;
+
+    // Visible to the model as a flat function...
+    flattened.assert_visible_contains(&["mcp__direct__lookup"]);
+    // ...not as a namespace wrapper.
+    assert!(
+        flattened.namespace_function_names("mcp__direct").is_empty(),
+        "expected no `mcp__direct` namespace, got {:?}",
+        flattened.namespace_function_names("mcp__direct")
+    );
+    assert!(matches!(
+        flattened.visible_spec("mcp__direct__lookup"),
+        ToolSpec::Function(_)
+    ));
+    // Still dispatchable: the registry keeps its namespaced entry (whose flat
+    // display concatenates with no delimiter). The tolerant resolver maps the
+    // model-visible `mcp__direct__lookup` call onto it by canonical form.
+    flattened.assert_registered_contains(&["mcp__directlookup"]);
+}
+
+#[test]
+fn flatten_namespace_spec_expands_to_prefixed_functions() {
+    let flattened = super::flatten_namespace_spec(mcp_namespace_spec());
+    let names: Vec<String> = flattened
+        .iter()
+        .map(|spec| match spec {
+            ToolSpec::Function(tool) => tool.name.clone(),
+            other => panic!("expected a function spec, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "mcp__wren_charts__list_models".to_string(),
+            "mcp__wren_charts__run_sql".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn flatten_namespace_spec_passes_through_non_namespace() {
+    let function = ToolSpec::Function(ResponsesApiTool {
+        name: "shell".to_string(),
+        description: "Shell.".to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: codex_tools::JsonSchema::default(),
+        output_schema: None,
+    });
+    let flattened = super::flatten_namespace_spec(function.clone());
+    assert_eq!(flattened, vec![function]);
+}

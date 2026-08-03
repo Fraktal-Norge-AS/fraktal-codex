@@ -1,5 +1,6 @@
 use crate::ModelsManagerConfig;
 use crate::manager::ModelsManager;
+use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::TruncationPolicyConfig;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
@@ -42,4 +43,31 @@ async fn offline_model_info_with_tool_output_override() {
         model_info.truncation_policy,
         TruncationPolicyConfig::tokens(/*limit*/ 123)
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn disable_image_inputs_strips_image_modality() {
+    let codex_home = TempDir::new().expect("create temp dir");
+    let manager = openai_manager_for_tests(
+        codex_home.path().to_path_buf(),
+        TestModelsEndpoint::new(Vec::new()),
+    );
+
+    // Default: an unknown model falls back to text+image modalities.
+    let default_info = manager
+        .get_model_info("unknown-local-model", &ModelsManagerConfig::default())
+        .await;
+    assert!(default_info.input_modalities.contains(&InputModality::Image));
+
+    // With the override, Image is removed (text retained).
+    let stripped_info = manager
+        .get_model_info(
+            "unknown-local-model",
+            &ModelsManagerConfig {
+                disable_image_inputs: true,
+                ..Default::default()
+            },
+        )
+        .await;
+    assert_eq!(stripped_info.input_modalities, vec![InputModality::Text]);
 }

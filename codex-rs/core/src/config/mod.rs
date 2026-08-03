@@ -1594,6 +1594,7 @@ impl Config {
             personality_enabled: self.features.enabled(Feature::Personality),
             personality: self.personality,
             model_catalog: self.model_catalog.clone(),
+            disable_image_inputs: self.features.enabled(Feature::DisableImageInputs),
         }
     }
 
@@ -1751,7 +1752,12 @@ impl Config {
     }
 
     pub(crate) fn prefix_mcp_tool_names(&self) -> bool {
-        !self.features.enabled(Feature::NonPrefixedMcpToolNames)
+        // [fraktal] Flattening MCP tools into top-level functions relies on the
+        // tolerant dispatch resolver, which only matches names whose canonical
+        // form starts with `mcp`. Force the `mcp__` prefix when flattening so the
+        // two features can't be combined into a silently-broken state.
+        self.features.enabled(Feature::FlattenMcpTools)
+            || !self.features.enabled(Feature::NonPrefixedMcpToolNames)
             || self.non_prefixed_mcp_tool_servers.is_some()
     }
 

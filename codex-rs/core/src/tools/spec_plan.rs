@@ -315,12 +315,19 @@ fn build_model_visible_specs(
     }
     specs.extend(hosted_specs);
 
-    merge_into_namespaces(specs)
-        .into_iter()
-        .filter(|spec| {
-            namespace_tools_enabled(turn_context) || !matches!(spec, ToolSpec::Namespace(_))
-        })
-        .collect()
+    let merged = merge_into_namespaces(specs);
+    if flatten_mcp_tools_enabled(turn_context) {
+        // [fraktal] Flatten namespaces into individual function tools instead of
+        // dropping them, so chat-completions / local models can call MCP tools.
+        merged.into_iter().flat_map(flatten_namespace_spec).collect()
+    } else {
+        merged
+            .into_iter()
+            .filter(|spec| {
+                namespace_tools_enabled(turn_context) || !matches!(spec, ToolSpec::Namespace(_))
+            })
+            .collect()
+    }
 }
 
 fn spec_for_model_request(
@@ -392,7 +399,16 @@ pub(crate) fn tool_suggest_enabled(turn_context: &TurnContext) -> bool {
 }
 
 fn namespace_tools_enabled(turn_context: &TurnContext) -> bool {
-    turn_context.provider.capabilities().namespace_tools
+    turn_context.provider.capabilities().namespace_tools && !flatten_mcp_tools_enabled(turn_context)
+}
+
+/// [fraktal] When enabled, MCP (and any other) namespaced tools are exposed as
+/// flat top-level function tools rather than Responses-API `type: "namespace"`
+/// tools, so chat-completions / local models (Ollama) can call them. This also
+/// turns off the namespace-only tool variants (tool search, standalone web
+/// search, namespaced collaboration tools) so everything goes out flat.
+fn flatten_mcp_tools_enabled(turn_context: &TurnContext) -> bool {
+    turn_context.features.get().enabled(Feature::FlattenMcpTools)
 }
 
 fn multi_agent_v2_enabled(turn_context: &TurnContext) -> bool {
@@ -641,6 +657,32 @@ fn merge_into_namespaces(specs: Vec<ToolSpec>) -> Vec<ToolSpec> {
     }
 
     merged_specs
+}
+
+/// [fraktal] Flatten a `ToolSpec::Namespace` into individual `ToolSpec::Function`
+/// specs named `{namespace}__{tool}` (e.g. `mcp__wren_charts__list_models`).
+///
+/// Responses-API `type: "namespace"` tools are only understood by models that
+/// implement that convention (the OpenAI GPT-5 family). Chat-completions / local
+/// models served via Ollama see the namespace as an opaque wrapper and cannot
+/// call the tools inside it. Flattening exposes each inner tool as a plain
+/// function the model can call directly; the tolerant resolver in the tool
+/// registry maps the flat `mcp__server__tool` name back to the registered
+/// namespaced tool at dispatch time. Non-namespace specs pass through unchanged.
+fn flatten_namespace_spec(spec: ToolSpec) -> Vec<ToolSpec> {
+    let ToolSpec::Namespace(namespace) = spec else {
+        return vec![spec];
+    };
+    namespace
+        .tools
+        .into_iter()
+        .map(|tool| match tool {
+            ResponsesApiNamespaceTool::Function(mut function) => {
+                function.name = format!("{}__{}", namespace.name, function.name);
+                ToolSpec::Function(function)
+            }
+        })
+        .collect()
 }
 
 fn code_mode_namespace_descriptions(

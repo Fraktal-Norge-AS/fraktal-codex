@@ -176,6 +176,16 @@ pub enum Feature {
     DeferredToolWorldState,
     /// Expose MCP model-visible namespaces without the legacy `mcp__` prefix.
     NonPrefixedMcpToolNames,
+    /// [fraktal] Flatten MCP tools into individual top-level function tools
+    /// (`mcp__server__tool`) instead of Responses-API `type: "namespace"`
+    /// tools. Local / chat-completions models (Ollama) don't understand
+    /// namespaced tools, so without this they can't call MCP tools at all.
+    FlattenMcpTools,
+    /// [fraktal] Declare the active model as text-only: strip image content
+    /// from messages and tool outputs before sending. Strict local Responses
+    /// bridges (llama.cpp) reject image content in tool outputs (e.g. an MCP
+    /// tool that returns a chart PNG); this keeps requests valid.
+    DisableImageInputs,
     /// Enable discoverable tool suggestions for apps.
     ToolSuggest,
     /// Include recommended plugins in model-visible context.
@@ -1157,6 +1167,18 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::NonPrefixedMcpToolNames,
         key: "non_prefixed_mcp_tool_names",
         stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::FlattenMcpTools,
+        key: "flatten_mcp_tools",
+        stage: Stage::Stable,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::DisableImageInputs,
+        key: "disable_image_inputs",
+        stage: Stage::Stable,
         default_enabled: false,
     },
     FeatureSpec {

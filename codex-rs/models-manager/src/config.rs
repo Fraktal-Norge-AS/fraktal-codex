@@ -10,4 +10,6 @@ pub struct ModelsManagerConfig {
     pub personality_enabled: bool,
     pub personality: Option<Personality>,
     pub model_catalog: Option<ModelsResponse>,
+    /// [fraktal] Force the model's input modalities to text-only (strip images).
+    pub disable_image_inputs: bool,
 }
