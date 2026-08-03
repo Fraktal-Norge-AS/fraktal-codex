@@ -44,7 +44,7 @@ Følgende er planlagt, men ikke ferdig:
   (`Fraktal-Norge-AS/fraktal-auth`).
 - **Installasjonspakker** — Homebrew-tap for macOS/Linux og signert MSI
   for Windows. Inntil disse er på plass, må du bygge fra kilde.
-- **Standard `~/.codex/config.toml`** levert av installeren. Inntil
+- **Standard `~/.fraktal/config.toml`** levert av installeren. Inntil
   videre må du legge inn konfigurasjonen selv (mal nedenfor).
 
 ## Bygg fra kilde
@@ -63,9 +63,10 @@ på Windows). Legg det på `PATH` selv, eller bruk det direkte.
 
 ## Konfigurasjon
 
-Konfigurasjonen ligger i `~/.codex/config.toml` (stien arves fra
-oppstrøms — `CODEX_HOME` overstyrer hvis ønskelig). Når installeren er
-klar vil den skrive en mal hvis filen mangler. Inntil videre:
+Konfigurasjonen ligger i `~/.fraktal/config.toml`. `FRAKTAL_HOME`
+overstyrer stien; `CODEX_HOME` godtas fortsatt som fallback slik at
+verktøy fra oppstrøms virker uendret. Når installeren er klar vil den
+skrive en mal hvis filen mangler. Inntil videre:
 
 ```toml
 # Standard: Fraktals Ollama-server (krever VPN / kontornett)
@@ -146,11 +147,11 @@ discover_models = true              # vis OpenRouters modeller i /model
 
 > **Profiler er egne filer.** Denne forken bruker ikke `[profiles.x]`-tabeller
 > i `config.toml` (de gir nå en feil). En profil `x` er en overlay-fil
-> `~/.codex/x.config.toml` som legges oppå `config.toml` når du kjører
+> `~/.fraktal/x.config.toml` som legges oppå `config.toml` når du kjører
 > `fraktal --profile x`. Den arver `[model_providers.*]`, `[features]` og
 > `[mcp_servers]` fra base-konfigurasjonen.
 
-`~/.codex/openrouter.config.toml`:
+`~/.fraktal/openrouter.config.toml`:
 
 ```toml
 model_provider = "fraktal-openrouter"
@@ -303,7 +304,7 @@ fraktal mcp list      # wren-charts = enabled
 ```
 
 Dette skriver en `[mcp_servers.wren-charts]`-blokk i
-`~/.codex/config.toml`.
+`~/.fraktal/config.toml`.
 
 ### Bruk
 

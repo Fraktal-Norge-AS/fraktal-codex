@@ -28,7 +28,7 @@ context lives in `~/.claude/plans/crispy-singing-moth.md`.
 - [ ] **Homebrew tap.** New repo `Fraktal-Norge-AS/homebrew-tap` with a
   `fraktal.rb` formula. Formula depends on `fraktal-auth`, downloads
   the static MUSL binary from our GitHub Releases, runs a post-install
-  step that writes `~/.codex/config.toml` if missing and prompts the
+  step that writes `~/.fraktal/config.toml` if missing and prompts the
   user to run `fraktal-auth login`.
 - [ ] **Windows MSI.** Signed installer built from the same Rust
   artifact. Same template-write + login prompt. Winget manifest as a

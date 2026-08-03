@@ -20,7 +20,7 @@ prize. The proper fix is org-owner-level (see [`FRAKTAL_TODO.md`](./FRAKTAL_TODO
 until then we live with the split.
 - **Patch budget: 10 commits.** Every commit on `fraktal/main` is a recurring
   rebase cost. Before adding a new one, consider whether the change can live
-  in `~/.codex/config.toml` (delivered by the installer), in the
+  in `~/.fraktal/config.toml` (delivered by the installer), in the
   `fraktal-auth` helper, or in a follow-up tap formula.
 
 ## One-time setup
@@ -140,7 +140,7 @@ up when the corresponding infrastructure is ready.
   distribution channels).
 - **`.github/workflows/`** still target upstream's release artifacts and
   signing keys. Repoint them when CI is wired up.
-- **Default `~/.codex/config.toml` template** for the installer. Lives in
+- **Default `~/.fraktal/config.toml` template** for the installer. Lives in
   the Homebrew tap formula and the MSI installer, not in this repo. See
   the plan file for the template body.
 - **`fraktal-auth` helper binary.** Lives in `Fraktal-Norge-AS/fraktal-auth`

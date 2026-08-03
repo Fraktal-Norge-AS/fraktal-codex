@@ -23,6 +23,13 @@ No tagged Fraktal release yet.
   root as the header image.
 - **`FRAKTAL_TODO.md` / `FRAKTAL_CHANGELOG.md`** — project tracking
   surface.
+- **Egen hjemmekatalog `~/.fraktal`** — innstillinger og tilstand
+  (config, auth, historikk, sesjoner, logger) ligger nå under
+  `~/.fraktal` i stedet for `~/.codex`, så Fraktal og en eventuell
+  Codex-installasjon ikke deler tilstand. `FRAKTAL_HOME` overstyrer
+  stien; `CODEX_HOME` godtas fortsatt som fallback slik at verktøy og
+  skript fra oppstrøms virker uendret. Den repo-lokale `.codex/`-
+  prosjektkatalogen er bevisst uendret.
 - **Chat Completions wire-API gjeninnført** — oppstrøms fjernet `chat`
   (`d2394a2494`, discussion #7782) for å gå Responses-only. Fraktal
   porterer den tilbake så vi treffer OpenAI-kompatible Chat
@@ -85,8 +92,8 @@ No tagged Fraktal release yet.
 These would have inflated the patch series for marginal benefit; they
 live in [`FRAKTAL_TODO.md`](./FRAKTAL_TODO.md) if revisited:
 
-- `~/.codex/` config directory (unchanged on purpose — keeps upstream
-  config tooling working; `CODEX_HOME` overrides if you want).
+- Repo-lokal `.codex/`-prosjektkatalog (uendret med vilje — så Fraktal
+  fortsatt leser prosjektkonfigurasjon team-et allerede har sjekket inn).
 - ChatGPT login flow (left intact; harmless when a default
   `model_provider` is configured).
 - npm platform-package publishing pipeline (deferred until we set up
