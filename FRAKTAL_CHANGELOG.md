@@ -10,9 +10,36 @@ upstream changes see [openai/codex releases][upstream-releases].
 
 ## [Unreleased] — fork bootstrap
 
-Initial Fraktal patch series on top of upstream `main` (snapshot
-`2d1ad374a7` — `feat(tui): make turn interruption keybind configurable`).
-No tagged Fraktal release yet.
+Fraktal patch series on top of upstream `main` (snapshot `bb5054fe47` —
+`Capture rollout budget units from response usage`). No tagged Fraktal
+release yet.
+
+### Upstream-synk
+
+Rebasert fra `3ded846488` til `bb5054fe47` (1288 oppstrøms-commits). Hele
+serien er delt i én commit per funksjon, så en enkelt funksjon kan
+droppes eller rebases for seg. Tilpasninger som fulgte av synken:
+
+- `ResponseItem::metadata` heter nå
+  `internal_chat_message_metadata_passthrough`; item-ID-er ble
+  `Option<ResponseItemId>`; `FunctionCall` fikk `encrypted_function_args`
+  og `FunctionCallOutput` fikk `id`.
+- `ContentItem` / `FunctionCallOutputContentItem` fikk `InputAudio`, som
+  Chat Completions ikke kan representere — droppes som kryptert innhold.
+- Chat-stien speiler nå Responses-stien: transport fra
+  `build_api_transport`, feil via `provider.map_api_error`, og
+  `map_response_stream` / `handle_unauthorized` tar provideren.
+- `.github/workflows/bazel.yml` er ikke lenger slettet, men gated med
+  `if: github.repository == 'openai/codex'` (samme mønster som
+  `rust-release.yml`). Sletting ga delete/modify-konflikt hver gang
+  oppstrøms rørte fila.
+- `codex-mcp/src/connection_manager.rs` ble splittet i en modulkatalog
+  oppstrøms; den tolerante server-navn-oppslaget ligger nå i
+  `connection_manager/resources.rs` der `client_by_name` bor.
+
+Kjent: `code-mode-runtime` bygger ikke på Windows fordi oppstrøms
+`v8`-avhengighet ikke finner et ferdigbygd arkiv for målet. Ikke relatert
+til fork-endringene.
 
 ### Added
 

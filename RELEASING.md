@@ -54,14 +54,55 @@ If a patch conflicts:
 
 After a clean rebase, run the smoke test below before force-pushing.
 
+### Conflict patterns seen so far
+
+- **One commit per feature.** Never let work pile up as one big patch. The
+  conflicts are the same either way, but split commits tell you *which
+  feature* each conflict belongs to, and let you drop a feature instead of
+  untangling it. Keep the working tree clean before starting.
+- **Additive struct/field conflicts are the common case.** Upstream adds a
+  field where we added ours (`supports_standalone_web_search` vs
+  `discover_models`). Resolution is "keep both sides" — this accounted for
+  26 of 31 conflicts in the `bb5054fe47` sync.
+- **An empty `HEAD` side means upstream moved the code**, not that it
+  deleted it. Check with `git grep -l '<symbol>' upstream/main` before
+  accepting our side, or you will re-add a few hundred lines of relocated
+  upstream code. Re-apply only *our* delta at the new location.
+- **`config.schema.json` is generated.** Hand-merge it if you must, but the
+  authority is `cargo test -p codex-core --lib -- config::schema::tests::config_schema_matches_fixture`
+  (byte-exact, including the trailing newline), or regenerate with
+  `just write-config-schema`.
+- **Deleting an upstream file guarantees recurring conflicts.** Gate it
+  instead (`if: github.repository == 'openai/codex'`). If the job already
+  has an `if:`, fold the condition in — a duplicate YAML key is silently
+  dropped.
+- **Serialized structs have expectation fixtures elsewhere.** Adding a
+  field to `ModelProviderInfo` also changes the TOML in
+  `config/src/thread_config.rs` tests. `cargo check` will not catch this;
+  only running the tests will.
+
 ## Smoke test
 
 ```sh
 cd codex-rs
+# Windows debug test binaries overflow the default stack on upstream's
+# async tests; harmless but it aborts the run.
+RUST_MIN_STACK=67108864 cargo test -p codex-core -p codex-config -p codex-api \
+  -p codex-models-manager -p codex-mcp -p codex-tools -p codex-utils-home-dir --lib
+cargo fmt --all -- --check
+cargo clippy --all-targets -p codex-core -p codex-cli -p codex-api
+
 cargo build --release -p codex-cli
 ./target/release/fraktal --version
 ./target/release/fraktal --help | head -5    # confirm bin_name = fraktal
+FRAKTAL_HOME=/definitely/not/here ./target/release/fraktal debug prompt-input
+# ^ must fail naming FRAKTAL_HOME — proves home resolution is wired
 ```
+
+`cargo check --workspace` does **not** pass on Windows: upstream's `v8`
+dependency has no prebuilt archive for `x86_64-pc-windows-msvc`, so
+`code-mode-runtime` and `v8-poc` fail to build. Build the crates you
+touched instead, or set `V8_FROM_SOURCE=1` if you need the full workspace.
 
 Optional end-to-end checks when the helper + config are in place:
 
@@ -101,26 +142,49 @@ do not blow their work away.
 ## Current patch series
 
 Run `git log --oneline upstream/main..fraktal/main` to see the live list.
-At the time of the initial fork it was:
+As of the `bb5054fe47` sync:
 
 ```
-[fraktal] disable fork-unsafe CI workflows
-[fraktal] add RELEASING.md rebase runbook
-[fraktal] feature-gate Statsig telemetry exporter
-[fraktal] repoint update-check URL and brand strings
-[fraktal] rename binary codex -> fraktal
-[fraktal] tolerant MCP tool-name resolution for local models
+[fraktal] rebrand binary, disable OpenAI telemetry and CI, repoint update check
+[fraktal] add Fraktal docs, logo, and ml-dev-titan config template
+[fraktal] document DeepInfra provider via LiteLLM proxy
+[fraktal] restore `chat` wire API for OpenAI-compatible providers
+[fraktal] discover provider models from the OpenAI-compatible /models endpoint
+[fraktal] make MCP tools usable from non-namespace-aware models
+[fraktal] document the chat wire API, model discovery and MCP flattening
+[fraktal] adapt fork features to upstream API changes
+[fraktal] store settings and state in ~/.fraktal
+[fraktal] satisfy rustfmt and clippy after the upstream merge
 ```
 
-`[fraktal] tolerant MCP tool-name resolution` touches
-`core/src/tools/registry.rs` (+ `registry_tests.rs`): on an exact tool-lookup
-miss, `resolve_fuzzy_mcp_name` / `canonical_tool_key` resolve `mcp__server__tool`
-calls whose namespace was flattened into the name or whose `__` separator was
-mangled to `.`/`:`. Needed because OpenAI-compatible chat-completions models
-(Ollama: qwen3.5, gemma4) don't reproduce the exact host-side namespaced name.
-Watch this one on rebase — it lives in a hot dispatch path; if upstream reworks
-`ToolRegistry::dispatch_any_with_terminal_outcome` or `flat_tool_name`, re-verify
-the fallback still fires before the `unsupported call` return.
+Cost ranking, by how much upstream churns the files each patch touches
+(commits between `3ded846488` and `bb5054fe47`):
+
+| Patch | Hottest files it touches |
+| --- | --- |
+| MCP flattening + tolerant resolution | `spec_plan.rs` 43, `connection_manager.rs` 38, `registry.rs` 11 |
+| chat wire API | `client.rs` 30, `codex-api/lib.rs` 7, `tool_spec.rs` 4 |
+| rebrand | `cli/main.rs` 26, `rust-release.yml` 10, `cli/Cargo.toml` 9 |
+| model discovery | `model_info.rs` 9, `manager.rs` 4 |
+
+**`[fraktal] make MCP tools usable from non-namespace-aware models` is the
+most expensive patch and the best upstreaming candidate.**
+`ProviderCapabilities::namespace_tools` is `true` for *every* provider, so
+Codex emits Responses-API `type: "namespace"` tools unconditionally — but
+only the OpenAI GPT-5 family implements that convention. Every other model
+sees an opaque wrapper and cannot call the tools inside, making MCP tools
+silently invisible. That is an upstream bug, not a Fraktal preference; if
+upstream fixes it we drop our highest-churn patch. Until then, watch it on
+rebase: it lives in a hot dispatch path, so if upstream reworks
+`ToolRegistry::dispatch_any_with_terminal_outcome`, `flat_tool_name`, or
+`build_model_visible_specs`, re-verify the fallback still fires before the
+`unsupported call` return.
+
+**`[fraktal] restore `chat` wire API`** is a deliberate revert of upstream
+discussion #7782. It is the largest patch (~1250 lines) in the area upstream
+refactors most. It exists so Ollama and OpenRouter work with no extra
+infrastructure; if the LiteLLM proxy path (see README) proves sufficient for
+those too, this patch can be dropped outright.
 
 Each commit is documented in its message; they are intentionally narrow.
 See `C:\Users\EmilLindfors\.claude\plans\crispy-singing-moth.md` for the
