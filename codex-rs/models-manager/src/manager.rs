@@ -35,6 +35,14 @@ pub trait ModelsEndpointClient: fmt::Debug + Send + Sync {
     /// Returns whether this provider can authenticate command-scoped requests.
     fn has_command_auth(&self) -> bool;
 
+    /// Returns whether this provider discovers its model list live from an
+    /// OpenAI-compatible `/models` endpoint instead of relying on the bundled
+    /// catalog or the Codex backend. When true, [`Self::list_models`] returns
+    /// the discovered models and the manager treats them as the source of truth.
+    fn discovers_models(&self) -> bool {
+        false
+    }
+
     /// Returns whether the currently resolved auth can use Codex backend-only models.
     fn uses_codex_backend(&self) -> ModelsEndpointFuture<'_, bool>;
 
@@ -218,6 +226,10 @@ pub struct OpenAiModelsManager {
     cache_manager: Option<ModelsCacheManager>,
     endpoint_client: SharedModelsEndpointClient,
     auth_manager: Option<Arc<AuthManager>>,
+    /// When true, the endpoint discovers models live (see
+    /// [`ModelsEndpointClient::discovers_models`]); discovered models replace
+    /// the bundled catalog rather than merging with it.
+    discover_models: bool,
 }
 
 /// Static model manager backed by an authoritative in-process catalog.
@@ -255,13 +267,22 @@ impl OpenAiModelsManager {
         endpoint_client: Arc<dyn ModelsEndpointClient>,
         auth_manager: Option<Arc<AuthManager>>,
     ) -> Self {
-        let remote_models = load_remote_models_from_file().unwrap_or_default();
+        let discover_models = endpoint_client.discovers_models();
+        // Discovery providers (e.g. a local Ollama server) own their full model
+        // list, so seed empty instead of the bundled OpenAI catalog; the first
+        // refresh populates it from the provider's `/models` endpoint.
+        let remote_models = if discover_models {
+            Vec::new()
+        } else {
+            load_remote_models_from_file().unwrap_or_default()
+        };
         Self {
             remote_models: RwLock::new(remote_models),
             etag: RwLock::new(None),
             cache_manager,
             endpoint_client,
             auth_manager,
+            discover_models,
         }
     }
 }
@@ -411,7 +432,9 @@ impl OpenAiModelsManager {
     }
 
     async fn should_refresh_models(&self) -> bool {
-        self.endpoint_client.uses_codex_backend().await || self.endpoint_client.has_command_auth()
+        self.discover_models
+            || self.endpoint_client.uses_codex_backend().await
+            || self.endpoint_client.has_command_auth()
     }
 
     async fn get_etag(&self) -> Option<String> {
@@ -420,6 +443,13 @@ impl OpenAiModelsManager {
 
     /// Replace the cached remote models and rebuild the derived presets list.
     async fn apply_remote_models(&self, models: Vec<ModelInfo>) {
+        // Discovery providers own their entire catalog: the discovered models
+        // are authoritative, so replace wholesale rather than merging with the
+        // bundled OpenAI presets (which would otherwise pollute the picker).
+        if self.discover_models {
+            *self.remote_models.write().await = models;
+            return;
+        }
         // Use the remote models list as the source of truth if it contains at least one
         // non-hidden model and the user is using ChatGPT auth.
         let should_use_remote_models_only = !models.is_empty()

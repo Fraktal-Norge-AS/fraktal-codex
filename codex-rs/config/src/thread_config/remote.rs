@@ -191,6 +191,9 @@ fn model_provider_from_proto(
         requires_openai_auth: provider.requires_openai_auth,
         supports_websockets: provider.supports_websockets,
         supports_standalone_web_search: provider.supports_standalone_web_search,
+        // Live model discovery is a local-only opt-in; not plumbed through the
+        // remote thread-config proto surface.
+        discover_models: false,
     };
     Ok((id, info))
 }
@@ -219,6 +222,8 @@ fn model_provider_to_proto(
         requires_openai_auth,
         supports_websockets,
         supports_standalone_web_search,
+        // Local-only; no corresponding proto field.
+        discover_models: _,
     } = provider;
 
     proto::ModelProvider {
@@ -560,6 +565,7 @@ mod tests {
             supports_websockets: true,
             supports_standalone_web_search: true,
             aws: None,
+            discover_models: false,
         }
     }
 

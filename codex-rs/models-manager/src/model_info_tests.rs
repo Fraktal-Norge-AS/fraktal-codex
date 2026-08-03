@@ -5,6 +5,7 @@ use codex_protocol::openai_models::ApprovalMessages;
 use codex_protocol::openai_models::AutoReviewMessages;
 use codex_protocol::openai_models::CollaborationModeMessages;
 use codex_protocol::openai_models::PermissionMessages;
+use codex_protocol::openai_models::ModelVisibility;
 use pretty_assertions::assert_eq;
 
 fn config_with_personality(personality: Option<Personality>) -> ModelsManagerConfig {
@@ -13,6 +14,26 @@ fn config_with_personality(personality: Option<Personality>) -> ModelsManagerCon
         personality,
         ..Default::default()
     }
+}
+
+#[test]
+fn discovered_model_info_is_picker_visible_and_not_fallback() {
+    let model = discovered_model_info("deepseek-coder-v2:16b");
+
+    assert_eq!(model.slug, "deepseek-coder-v2:16b");
+    assert_eq!(model.display_name, "deepseek-coder-v2:16b");
+    // Must be List so it surfaces in the `/model` picker.
+    assert_eq!(model.visibility, ModelVisibility::List);
+    // Discovery is authoritative for these providers, not a fallback guess.
+    assert!(!model.used_fallback_model_metadata);
+}
+
+#[test]
+fn model_info_from_slug_stays_hidden_and_marked_fallback() {
+    let model = model_info_from_slug("mystery-model");
+
+    assert_eq!(model.visibility, ModelVisibility::None);
+    assert!(model.used_fallback_model_metadata);
 }
 
 #[test]

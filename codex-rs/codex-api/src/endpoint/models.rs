@@ -77,6 +77,49 @@ impl<T: HttpTransport> ModelsClient<T> {
 
         Ok((models, header_etag))
     }
+
+    /// List model ids from a plain OpenAI-compatible `/models` endpoint.
+    ///
+    /// Unlike [`Self::list_models`], this does not expect Codex's rich
+    /// `ModelsResponse`; it parses the standard OpenAI/Ollama shape
+    /// (`{"object":"list","data":[{"id":"..."}]}`) and returns just the slugs.
+    /// Callers synthesize model metadata from these ids. Entries without a
+    /// string `id` are skipped.
+    pub async fn list_openai_compat_model_ids(
+        &self,
+        extra_headers: HeaderMap,
+    ) -> Result<Vec<String>, ApiError> {
+        let resp = self
+            .session
+            .execute(Method::GET, Self::path(), extra_headers, /*body*/ None)
+            .await?;
+
+        let body: serde_json::Value =
+            serde_json::from_slice(&resp.body).map_err(|e| {
+                ApiError::Stream(format!(
+                    "failed to decode models response: {e}; body: {}",
+                    String::from_utf8_lossy(&resp.body)
+                ))
+            })?;
+
+        let ids = body
+            .get("data")
+            .and_then(serde_json::Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| {
+                        entry
+                            .get("id")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(ids)
+    }
 }
 
 #[cfg(test)]
@@ -241,6 +284,75 @@ mod tests {
         assert_eq!(models[0].slug, "gpt-test");
         assert_eq!(models[0].supported_in_api, true);
         assert_eq!(models[0].priority, 1);
+    }
+
+    /// Transport that returns a fixed raw body, for endpoints whose payload is
+    /// not a Codex `ModelsResponse` (e.g. an OpenAI/Ollama `/models` list).
+    #[derive(Clone)]
+    struct RawBodyTransport {
+        body: Arc<Vec<u8>>,
+    }
+
+    impl HttpTransport for RawBodyTransport {
+        async fn execute(&self, _req: Request) -> Result<Response, TransportError> {
+            Ok(Response {
+                status: StatusCode::OK,
+                headers: HeaderMap::new(),
+                body: (*self.body).clone().into(),
+            })
+        }
+
+        async fn stream(&self, _req: Request) -> Result<StreamResponse, TransportError> {
+            Err(TransportError::Build("stream should not run".to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn list_openai_compat_model_ids_parses_data_array() {
+        let body = json!({
+            "object": "list",
+            "data": [
+                {"id": "deepseek-coder-v2:16b", "object": "model"},
+                {"id": "qwen2.5-coder:32b", "object": "model"},
+                {"object": "model"}, // entry without an id is skipped
+            ],
+        });
+        let transport = RawBodyTransport {
+            body: Arc::new(serde_json::to_vec(&body).unwrap()),
+        };
+
+        let client = ModelsClient::new(
+            transport,
+            provider("http://localhost:11434/v1"),
+            Arc::new(DummyAuth),
+        );
+
+        let ids = client
+            .list_openai_compat_model_ids(HeaderMap::new())
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(ids, vec!["deepseek-coder-v2:16b", "qwen2.5-coder:32b"]);
+    }
+
+    #[tokio::test]
+    async fn list_openai_compat_model_ids_tolerates_missing_data() {
+        let transport = RawBodyTransport {
+            body: Arc::new(serde_json::to_vec(&json!({"object": "list"})).unwrap()),
+        };
+
+        let client = ModelsClient::new(
+            transport,
+            provider("http://localhost:11434/v1"),
+            Arc::new(DummyAuth),
+        );
+
+        let ids = client
+            .list_openai_compat_model_ids(HeaderMap::new())
+            .await
+            .expect("request should succeed");
+
+        assert!(ids.is_empty());
     }
 
     #[tokio::test]

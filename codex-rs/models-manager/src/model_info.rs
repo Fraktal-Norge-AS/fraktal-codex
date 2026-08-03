@@ -123,9 +123,12 @@ fn clear_instruction_messages(model: &mut ModelInfo) {
     }
 }
 
-/// Build a minimal fallback model descriptor for missing/unknown slugs.
-pub fn model_info_from_slug(slug: &str) -> ModelInfo {
-    warn!("Unknown model {slug} is used. This will use fallback model metadata.");
+/// Build a generic model descriptor for a slug we have no rich metadata for.
+///
+/// `visibility` lets callers decide whether the model should surface in the
+/// picker (`List`) or stay hidden (`None`). Defaults are conservative and
+/// model-agnostic so any OpenAI-compatible slug works out of the box.
+fn generic_model_info(slug: &str, visibility: ModelVisibility, priority: i32) -> ModelInfo {
     ModelInfo {
         slug: slug.to_string(),
         display_name: slug.to_string(),
@@ -133,9 +136,9 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
         default_reasoning_level: None,
         supported_reasoning_levels: Vec::new(),
         shell_type: ConfigShellToolType::Default,
-        visibility: ModelVisibility::None,
+        visibility,
         supported_in_api: true,
-        priority: 99,
+        priority,
         additional_speed_tiers: Vec::new(),
         service_tiers: Vec::new(),
         default_service_tier: None,
@@ -160,13 +163,32 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),
         input_modalities: default_input_modalities(),
-        used_fallback_model_metadata: true, // this is the fallback model metadata
+        used_fallback_model_metadata: false,
         supports_search_tool: false,
         use_responses_lite: false,
         auto_review_model_override: None,
         tool_mode: None,
         multi_agent_version: None,
     }
+}
+
+/// Build a minimal fallback model descriptor for missing/unknown slugs.
+pub fn model_info_from_slug(slug: &str) -> ModelInfo {
+    warn!("Unknown model {slug} is used. This will use fallback model metadata.");
+    ModelInfo {
+        used_fallback_model_metadata: true, // this is the fallback model metadata
+        ..generic_model_info(slug, ModelVisibility::None, /*priority*/ 99)
+    }
+}
+
+/// Build a picker-visible descriptor for a model discovered live from a
+/// provider's OpenAI-compatible `/models` endpoint.
+///
+/// Unlike [`model_info_from_slug`], the result is `visibility: List` so it
+/// appears in the `/model` picker, and it is not flagged as fallback metadata
+/// (discovery is the authoritative source for these providers).
+pub fn discovered_model_info(slug: &str) -> ModelInfo {
+    generic_model_info(slug, ModelVisibility::List, /*priority*/ 50)
 }
 
 fn local_personality_messages_for_slug(slug: &str) -> Option<ModelMessages> {

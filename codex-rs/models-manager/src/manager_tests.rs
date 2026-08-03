@@ -78,6 +78,7 @@ fn assert_models_contain(actual: &[ModelInfo], expected: &[ModelInfo]) {
 struct TestModelsEndpoint {
     has_command_auth: bool,
     uses_codex_backend: bool,
+    discover_models: bool,
     responses: Mutex<VecDeque<Vec<ModelInfo>>>,
     fetch_count: AtomicUsize,
     observed_proxy_policy: Mutex<Option<OutboundProxyPolicy>>,
@@ -88,6 +89,7 @@ impl TestModelsEndpoint {
         Arc::new(Self {
             has_command_auth: false,
             uses_codex_backend: true,
+            discover_models: false,
             responses: Mutex::new(responses.into()),
             fetch_count: AtomicUsize::new(0),
             observed_proxy_policy: Mutex::new(None),
@@ -98,6 +100,19 @@ impl TestModelsEndpoint {
         Arc::new(Self {
             has_command_auth: false,
             uses_codex_backend: false,
+            discover_models: false,
+            responses: Mutex::new(responses.into()),
+            fetch_count: AtomicUsize::new(0),
+        })
+    }
+
+    /// Endpoint that only discovers models (no Codex backend, no command auth),
+    /// mirroring a local OpenAI-compatible provider like Ollama.
+    fn discovering(responses: Vec<Vec<ModelInfo>>) -> Arc<Self> {
+        Arc::new(Self {
+            has_command_auth: false,
+            uses_codex_backend: false,
+            discover_models: true,
             responses: Mutex::new(responses.into()),
             fetch_count: AtomicUsize::new(0),
             observed_proxy_policy: Mutex::new(None),
@@ -162,6 +177,10 @@ impl ExternalAuth for TestUnresolvedExternalApiKeyAuth {
 impl ModelsEndpointClient for TestModelsEndpoint {
     fn has_command_auth(&self) -> bool {
         self.has_command_auth
+    }
+
+    fn discovers_models(&self) -> bool {
+        self.discover_models
     }
 
     fn uses_codex_backend(&self) -> ModelsEndpointFuture<'_, bool> {
@@ -407,6 +426,44 @@ async fn get_model_info_tracks_fallback_usage() {
         .await;
     assert!(unknown.used_fallback_model_metadata);
     assert_eq!(unknown.slug, "model-that-does-not-exist");
+}
+
+#[tokio::test]
+async fn discover_mode_replaces_bundled_catalog() {
+    let discovered = vec![
+        remote_model("local-a", "Local A", /*priority*/ 0),
+        remote_model("local-b", "Local B", /*priority*/ 1),
+    ];
+    let codex_home = tempdir().expect("temp dir");
+    let endpoint = TestModelsEndpoint::discovering(vec![discovered.clone()]);
+    // No ChatGPT/Codex backend auth: discovery alone must drive the picker.
+    let manager = openai_manager_for_tests_with_auth(
+        codex_home.path().to_path_buf(),
+        endpoint.clone(),
+        /*auth_manager*/ None,
+    );
+
+    let presets = manager.list_models(RefreshStrategy::Online).await;
+
+    // Only the discovered models surface — the bundled OpenAI presets are gone.
+    let slugs: Vec<String> = presets.iter().map(|preset| preset.model.clone()).collect();
+    assert_eq!(slugs, vec!["local-a".to_string(), "local-b".to_string()]);
+    assert_eq!(endpoint.fetch_count(), 1);
+}
+
+#[tokio::test]
+async fn discover_mode_seeds_empty_before_refresh() {
+    let codex_home = tempdir().expect("temp dir");
+    let endpoint = TestModelsEndpoint::discovering(Vec::new());
+    let manager = openai_manager_for_tests_with_auth(
+        codex_home.path().to_path_buf(),
+        endpoint,
+        /*auth_manager*/ None,
+    );
+
+    // Without a refresh, a discovery provider has no models (it does not fall
+    // back to the bundled OpenAI catalog).
+    assert!(manager.get_remote_models().await.is_empty());
 }
 
 #[tokio::test]
@@ -672,6 +729,7 @@ async fn refresh_available_models_keeps_merging_for_api_auth() {
     let endpoint = Arc::new(TestModelsEndpoint {
         has_command_auth: true,
         uses_codex_backend: false,
+        discover_models: false,
         responses: Mutex::new(vec![remote_models.clone()].into()),
         fetch_count: AtomicUsize::new(0),
         observed_proxy_policy: Mutex::new(None),

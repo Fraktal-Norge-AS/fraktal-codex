@@ -155,6 +155,14 @@ pub struct ModelProviderInfo {
     /// Whether this provider supports the standalone web-search endpoint.
     #[serde(default)]
     pub supports_standalone_web_search: bool,
+    /// [fraktal] When true, discover this provider's available models live from
+    /// its OpenAI-compatible `/models` endpoint (e.g. Ollama, a LiteLLM proxy)
+    /// and surface every reported model in the `/model` picker. This avoids
+    /// hand-maintaining a `model_catalog_json`: add a model to the server and it
+    /// shows up automatically. Discovered models use generic default metadata
+    /// since OpenAI-style `/models` only reports slugs.
+    #[serde(default)]
+    pub discover_models: bool,
 }
 
 /// AWS SigV4 auth configuration for a model provider.
@@ -378,6 +386,7 @@ impl ModelProviderInfo {
             requires_openai_auth: true,
             supports_websockets: true,
             supports_standalone_web_search: true,
+            discover_models: false,
         }
     }
 
@@ -412,6 +421,7 @@ impl ModelProviderInfo {
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            discover_models: false,
         }
     }
 
@@ -560,6 +570,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        discover_models: false,
     }
 }
 

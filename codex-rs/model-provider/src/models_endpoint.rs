@@ -23,6 +23,7 @@ use codex_login::default_client::create_client_for_route_async;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::ModelsEndpointClient;
 use codex_models_manager::manager::ModelsEndpointFuture;
+use codex_models_manager::model_info::discovered_model_info;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CoreResult;
@@ -105,6 +106,19 @@ impl OpenAiModelsEndpoint {
                 .await?;
             let client = ModelsClient::new(transport, api_provider, api_auth)
                 .with_telemetry(Some(request_telemetry));
+
+            // Discovery providers expose a plain OpenAI-style `/models` list
+            // (just slugs) rather than Codex's rich catalog, so parse that
+            // shape and synthesize default metadata for each reported model.
+            if self.provider_info.discover_models {
+                let ids = client
+                    .list_openai_compat_model_ids(HeaderMap::new())
+                    .await
+                    .map_err(map_api_error)?;
+                let models = ids.iter().map(|id| discovered_model_info(id)).collect();
+                return Ok((models, None));
+            }
+
             client
                 .list_models(request_url, HeaderMap::new())
                 .await
@@ -126,6 +140,10 @@ impl OpenAiModelsEndpoint {
 impl ModelsEndpointClient for OpenAiModelsEndpoint {
     fn has_command_auth(&self) -> bool {
         self.provider_info.has_command_auth()
+    }
+
+    fn discovers_models(&self) -> bool {
+        self.provider_info.discover_models
     }
 
     fn uses_codex_backend(&self) -> ModelsEndpointFuture<'_, bool> {

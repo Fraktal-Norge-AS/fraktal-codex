@@ -1723,6 +1723,11 @@
           "description": "Base URL for the provider's OpenAI-compatible API.",
           "type": "string"
         },
+        "discover_models": {
+          "default": false,
+          "description": "[fraktal] When true, discover this provider's available models live from its OpenAI-compatible `/models` endpoint (e.g. Ollama, a LiteLLM proxy) and surface every reported model in the `/model` picker. This avoids hand-maintaining a `model_catalog_json`: add a model to the server and it shows up automatically. Discovered models use generic default metadata since OpenAI-style `/models` only reports slugs.",
+          "type": "boolean"
+        },
         "env_http_headers": {
           "additionalProperties": {
             "type": "string"

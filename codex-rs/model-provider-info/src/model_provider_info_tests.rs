@@ -30,6 +30,7 @@ base_url = "http://localhost:11434/v1"
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        discover_models: false,
     };
 
     let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -65,6 +66,7 @@ query_params = { api-version = "2025-04-01-preview" }
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        discover_models: false,
     };
 
     let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -104,6 +106,7 @@ supports_standalone_web_search = true
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: true,
+        discover_models: false,
     };
 
     let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -196,6 +199,7 @@ fn test_supports_remote_compaction_for_azure_name() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        discover_models: false,
     };
 
     assert!(provider.supports_remote_compaction());
@@ -222,6 +226,7 @@ fn test_supports_remote_compaction_for_non_openai_non_azure_provider() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        discover_models: false,
     };
 
     assert!(!provider.supports_remote_compaction());
@@ -331,6 +336,7 @@ fn test_create_amazon_bedrock_provider() {
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            discover_models: false,
         }
     );
 }
