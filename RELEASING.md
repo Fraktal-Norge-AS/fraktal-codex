@@ -168,17 +168,43 @@ Cost ranking, by how much upstream churns the files each patch touches
 | model discovery | `model_info.rs` 9, `manager.rs` 4 |
 
 **`[fraktal] make MCP tools usable from non-namespace-aware models` is the
-most expensive patch and the best upstreaming candidate.**
-`ProviderCapabilities::namespace_tools` is `true` for *every* provider, so
-Codex emits Responses-API `type: "namespace"` tools unconditionally — but
-only the OpenAI GPT-5 family implements that convention. Every other model
-sees an opaque wrapper and cannot call the tools inside, making MCP tools
-silently invisible. That is an upstream bug, not a Fraktal preference; if
-upstream fixes it we drop our highest-churn patch. Until then, watch it on
+most expensive patch, and we should expect to carry it indefinitely.**
+
+The underlying defect is upstream's: `ProviderCapabilities::namespace_tools`
+is hard-coded `true` in `Default` (`model-provider/src/provider.rs`), is
+never set `false` anywhere, and has no config knob. So Codex emits
+Responses-API `type: "namespace"` tools to *every* provider — but only the
+OpenAI GPT-5 family implements that convention. Every other model sees an
+opaque wrapper and cannot call the tools inside, making MCP tools silently
+invisible. Worse, the `false` branch in `build_model_visible_specs` *drops*
+namespace specs rather than flattening them, so even a capability flag
+alone would not fix it.
+
+**Do not file this upstream — it is already filed and declined in
+practice:**
+
+- [#26234](https://github.com/openai/codex/issues/26234) — the exact
+  request, open since 2026-06-03, `bug` label, 29 comments, with a working
+  reference branch.
+- [#33263](https://github.com/openai/codex/issues/33263) — same defect
+  stated as "namespace tools are ignored by non-OpenAI endpoints".
+- PRs [#28271](https://github.com/openai/codex/pull/28271) and
+  [#29602](https://github.com/openai/codex/pull/29602) — both authored by
+  an OpenAI engineer, both **closed unmerged without explanation**
+  (2026-06-23 and 2026-07-06).
+
+Since the fix has been written and abandoned twice by upstream itself, plan
+for this patch to be permanent rather than transitional. Watch it on every
 rebase: it lives in a hot dispatch path, so if upstream reworks
 `ToolRegistry::dispatch_any_with_terminal_outcome`, `flat_tool_name`, or
 `build_model_visible_specs`, re-verify the fallback still fires before the
 `unsupported call` return.
+
+Worth considering: #26234's design makes `namespace_tools` a per-provider
+setting in `[model_providers.<id>]` defaulting to `requires_openai_auth`,
+so third-party providers get flat tools automatically. Ours is a global
+`flatten_mcp_tools` feature flag the user must switch on. Theirs is the
+better shape if we ever revisit this patch.
 
 **`[fraktal] restore `chat` wire API`** is a deliberate revert of upstream
 discussion #7782. It is the largest patch (~1250 lines) in the area upstream
