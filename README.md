@@ -33,6 +33,9 @@ Forken er fersk og under oppbygging. Følgende fungerer i dag:
 - Binæret bygger og kjører som `fraktal` (ikke `codex`).
 - Statsig-telemetri til OpenAI er slått av som standard.
 - Oppdateringssjekken peker mot vår egen GitHub Release.
+- **MCP-verktøy fungerer med lokale modeller** — tolerant navneoppslag
+  så Ollama-modeller (qwen3.5, gemma4) kan kalle MCP-servere. Se
+  [MCP-servere](#mcp-servere-med-lokale-modeller).
 
 Følgende er planlagt, men ikke ferdig:
 
@@ -84,6 +87,12 @@ model = "qwen3.5:27b"                # generell modell med tool-calling
 name = "Fraktal Ollama (ml-dev-titan)"
 base_url = "http://ml-dev-titan.fraktal.as:11434/v1"
 # wire_api er "responses" som standard og er den eneste gyldige verdien.
+# [fraktal] Oppdag modellene serveren faktisk har, og vis dem i /model.
+# Når denne er på, spør Fraktal providerens /v1/models-endepunkt og lister
+# hver rapporterte modell i velgeren — legg en ny modell på Ollama-serveren,
+# og den dukker opp uten å redigere config. Uten flagget viser /model kun
+# de innebygde GPT-modellene (de er irrelevante mot en Ollama-provider).
+discover_models = true
 
 # Bytt til Azure med: fraktal --profile azure
 [profiles.azure]
@@ -120,7 +129,68 @@ requires_openai_auth = false
 # Nøkkelen Fraktal sender til proxyen. Lokalt uten proxy-auth kan denne
 # linjen droppes; i delt drift settes LiteLLMs master key her.
 env_key = "LITELLM_MASTER_KEY"
+
+# OpenRouter, direkte (wire_api = "chat") — INGEN oversetter-proxy, i
+# motsetning til oppstrøms Codex som kun støtter Responses.
+# Provideren defineres her; selve profilvalget (model/model_provider) ligger
+# i en egen overlay-fil openrouter.config.toml (se under). Bytt til den med:
+#   fraktal --profile openrouter
+[model_providers.fraktal-openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+wire_api = "chat"                    # [fraktal] direkte Chat Completions
+requires_openai_auth = false
+env_key = "OPENROUTER_API_KEY"      # fra https://openrouter.ai/keys
+discover_models = true              # vis OpenRouters modeller i /model
 ```
+
+> **Profiler er egne filer.** Denne forken bruker ikke `[profiles.x]`-tabeller
+> i `config.toml` (de gir nå en feil). En profil `x` er en overlay-fil
+> `~/.codex/x.config.toml` som legges oppå `config.toml` når du kjører
+> `fraktal --profile x`. Den arver `[model_providers.*]`, `[features]` og
+> `[mcp_servers]` fra base-konfigurasjonen.
+
+`~/.codex/openrouter.config.toml`:
+
+```toml
+model_provider = "fraktal-openrouter"
+model = "z-ai/glm-5.2"               # OpenRouter model-slug
+```
+
+### OpenRouter (direkte)
+
+[OpenRouter](https://openrouter.ai) eksponerer kun et OpenAI-kompatibelt
+Chat Completions-endepunkt (`https://openrouter.ai/api/v1`). Oppstrøms
+Codex fjernet Chat Completions og snakker nå utelukkende Responses-API-et
+(se [#7782](https://github.com/openai/codex/discussions/7782)) — derfor
+trengte tidligere OpenRouter en oversetter-proxy. **Fraktal har gjeninnført
+`wire_api = "chat"`**, så vi treffer OpenRouter (og enhver annen
+OpenAI-kompatibel Chat Completions-tjeneste: DeepInfra, Groq, Together, …)
+direkte, uten proxy.
+
+Sett nøkkelen og kjør:
+
+```sh
+export OPENROUTER_API_KEY=...         # fra https://openrouter.ai/keys
+fraktal --profile openrouter "skriv en kort sammendrag av denne mappen"
+```
+
+Modell-slugen er den OpenRouter oppgir, f.eks. `z-ai/glm-5.2` (1M-kontekst-
+varianten heter `z-ai/glm-5.2[1m]`). Sjekk eksakt slug og pris på
+[openrouter.ai/z-ai](https://openrouter.ai/z-ai) før du bytter modell.
+
+NB: Chat Completions-transporten gir vanlig chat + tool-calling. De
+Responses-native funksjonene (server-side reasoning-items, kryptert
+reasoning, remote compaction og WebSocket-transport) finnes ikke i Chat
+Completions-protokollen og er derfor ikke tilgjengelige for `chat`-providere
+— uavhengig av modell. For GLM-5.2/Kimi er det uansett kurant.
+
+### DeepInfra (direkte eller via proxy)
+
+DeepInfra kan nå også treffes direkte med `wire_api = "chat"` mot
+`https://api.deepinfra.com/v1/openai` og `env_key = "DEEPINFRA_TOKEN"` —
+samme mønster som OpenRouter over. LiteLLM-oppsettet under er fortsatt
+gyldig hvis du vil samle flere bakomliggende tjenester bak ett endepunkt.
 
 ### DeepInfra via oversetter-proxy
 
@@ -185,6 +255,82 @@ fraktal --profile azure "samme spørsmål, men mot Azure-modellen"
 
 Codex' egne underkommandoer fungerer som vanlig — `fraktal --help`
 viser hele listen (`exec`, `mcp`, `plugin`, `login`, m.fl.).
+
+## MCP-servere (med lokale modeller)
+
+Fraktal kan bruke eksterne MCP-servere
+([Model Context Protocol](https://modelcontextprotocol.io)) for å gi
+modellen ekstra verktøy — for eksempel `wren-charts`, en MCP Apps-server
+som spør et semantisk datalag (Wren) og lager grafer.
+
+### Fraktal-patch: tolerant MCP-verktøynavn
+
+Codex eksponerer MCP-verktøy for modellen som
+`mcp__<server>__<verktøy>` (f.eks. `mcp__wren_charts__list_models`) —
+prefiks, namespace (= config-nøkkelen) og `__`-skilletegn legges på
+*vertssiden*; selve serveren tilbyr bare flate navn som `list_models`.
+Frontier-modeller gjengir det sammensatte navnet eksakt, men lokale
+modeller servert via OpenAI-kompatibel chat-completions (Ollama) gjør det
+ikke:
+
+- navnet kommer tilbake **flatt** uten eget namespace-felt, og
+- svakere modeller bytter `__`-skilletegnet med `.` eller `:`
+  (`qwen3.5:27b` gjorde dette).
+
+Oppstrøms Codex slår opp verktøy med **eksakt** navnematch og returnerte
+`unsupported call` for *alle* lokale modeller — til og med `gemma4:26b`,
+som sendte det helt korrekte `mcp__wren_charts__list_models`, fordi det
+flate navnet aldri ble delt tilbake i namespace + verktøy.
+
+Forken legger til en tolerant fallback i
+`core/src/tools/registry.rs` (`resolve_fuzzy_mcp_name` /
+`canonical_tool_key`): bommer det eksakte oppslaget, normaliseres
+namespace/navn-grensen (alle serier av `. : - _` → ett `_`) og kallet
+løses til det ene registrerte MCP-verktøyet som matcher. Tvetydige treff
+avvises, så den gjetter aldri. Dekket av enhetstester i
+`registry_tests.rs`. Med dette kaller både `qwen3.5:27b` og `gemma4:26b`
+MCP-verktøy ende-til-ende. (Navnekonvensjonen er vertssidig, så dette
+*kunne bare* fikses i Codex — serveren har ingen kontroll over prefiks,
+namespace eller skilletegn.)
+
+### Registrer en server
+
+```powershell
+# Bruk Fraktal-binæret (ikke en urelatert `fraktal` på PATH).
+fraktal mcp add wren-charts -- "C:\Users\<deg>\.bun\bin\bun.exe" `
+  "C:\sti\til\mcp-wren-charts\main.ts" --stdio
+fraktal mcp list      # wren-charts = enabled
+```
+
+Dette skriver en `[mcp_servers.wren-charts]`-blokk i
+`~/.codex/config.toml`.
+
+### Bruk
+
+```sh
+fraktal "lag et søylediagram over antall ordrer per status med wren-charts"
+```
+
+I interaktiv TUI godkjenner du verktøykallet når prompten dukker opp. I
+ikke-interaktiv `fraktal exec` finnes ingen som kan godkjenne, så kallet
+blir avbrutt (`user cancelled MCP tool call`) — send
+`--dangerously-bypass-approvals-and-sandbox` når miljøet er klarert:
+
+```powershell
+fraktal exec --dangerously-bypass-approvals-and-sandbox -c model="qwen3.5:27b" `
+  "Bruk wren-charts query_and_chart til å lage graf over ordrer per status.
+   Gi meg chart_path den lagret."
+```
+
+### MCP Apps (interaktive UI-er)
+
+Servere som `wren-charts` kan tilby interaktive `ui://`-ressurser
+([SEP-1865 / MCP Apps](https://modelcontextprotocol.io/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp)).
+Terminalen rendrer ikke iframes, så i Fraktal får du **dataene + en
+lagret PNG-sti** (`chart_path`) du åpner selv — ikke det interaktive
+UI-et. Verktøy uten UI (`list_models`, `run_sql`) vises som tekst. Vil du
+se det interaktive UI-et, bruk en vert med MCP Apps-støtte (VS Code,
+Claude Desktop, MCPJam).
 
 ## Forholdet til oppstrøms
 

@@ -23,6 +23,24 @@ No tagged Fraktal release yet.
   root as the header image.
 - **`FRAKTAL_TODO.md` / `FRAKTAL_CHANGELOG.md`** — project tracking
   surface.
+- **Chat Completions wire-API gjeninnført** — oppstrøms fjernet `chat`
+  (`d2394a2494`, discussion #7782) for å gå Responses-only. Fraktal
+  porterer den tilbake så vi treffer OpenAI-kompatible Chat
+  Completions-tjenester (OpenRouter, DeepInfra, Groq, …) direkte uten
+  oversetter-proxy. Omfang (minimal sti):
+  - `WireApi::Chat` tilbake i `codex-model-provider-info` (+ deserialisering
+    av `wire_api = "chat"`).
+  - `ChatRequestBuilder` + chat-SSE-parser + `ChatClient` gjeninnført i
+    `codex-api`, tilpasset dagens `EndpointSession`-arkitektur.
+  - `create_tools_json_for_chat_completions_api` tilbake i `codex-tools`.
+  - `WireApi::Chat`-gren i `core/src/client.rs` (`stream_chat_completions`)
+    som speiler Responses-stien, uten WebSocket/reasoning/compaction.
+  - **OpenRouter-provider** — `--profile openrouter` mot
+    `https://openrouter.ai/api/v1` med `wire_api = "chat"`, dokumentert med
+    `z-ai/glm-5.2`.
+  - Merk: chat-stien har ingen Responses-native funksjoner (server-side
+    reasoning, kryptert reasoning, remote compaction). Disse er
+    protokoll-begrensninger, ikke modell-begrensninger.
 
 ### Changed — rebrand
 

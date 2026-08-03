@@ -109,7 +109,18 @@ At the time of the initial fork it was:
 [fraktal] feature-gate Statsig telemetry exporter
 [fraktal] repoint update-check URL and brand strings
 [fraktal] rename binary codex -> fraktal
+[fraktal] tolerant MCP tool-name resolution for local models
 ```
+
+`[fraktal] tolerant MCP tool-name resolution` touches
+`core/src/tools/registry.rs` (+ `registry_tests.rs`): on an exact tool-lookup
+miss, `resolve_fuzzy_mcp_name` / `canonical_tool_key` resolve `mcp__server__tool`
+calls whose namespace was flattened into the name or whose `__` separator was
+mangled to `.`/`:`. Needed because OpenAI-compatible chat-completions models
+(Ollama: qwen3.5, gemma4) don't reproduce the exact host-side namespaced name.
+Watch this one on rebase — it lives in a hot dispatch path; if upstream reworks
+`ToolRegistry::dispatch_any_with_terminal_outcome` or `flat_tool_name`, re-verify
+the fallback still fires before the `unsupported call` return.
 
 Each commit is documented in its message; they are intentionally narrow.
 See `C:\Users\EmilLindfors\.claude\plans\crispy-singing-moth.md` for the
