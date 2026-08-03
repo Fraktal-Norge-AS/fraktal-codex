@@ -103,6 +103,7 @@ impl TestModelsEndpoint {
             discover_models: false,
             responses: Mutex::new(responses.into()),
             fetch_count: AtomicUsize::new(0),
+            observed_proxy_policy: Mutex::new(None),
         })
     }
 
@@ -443,7 +444,9 @@ async fn discover_mode_replaces_bundled_catalog() {
         /*auth_manager*/ None,
     );
 
-    let presets = manager.list_models(RefreshStrategy::Online).await;
+    let presets = manager
+        .list_models(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
+        .await;
 
     // Only the discovered models surface — the bundled OpenAI presets are gone.
     let slugs: Vec<String> = presets.iter().map(|preset| preset.model.clone()).collect();

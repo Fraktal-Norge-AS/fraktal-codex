@@ -408,7 +408,11 @@ fn namespace_tools_enabled(turn_context: &TurnContext) -> bool {
 /// turns off the namespace-only tool variants (tool search, standalone web
 /// search, namespaced collaboration tools) so everything goes out flat.
 fn flatten_mcp_tools_enabled(turn_context: &TurnContext) -> bool {
-    turn_context.features.get().enabled(Feature::FlattenMcpTools)
+    turn_context
+        .config
+        .features
+        .get()
+        .enabled(Feature::FlattenMcpTools)
 }
 
 fn multi_agent_v2_enabled(turn_context: &TurnContext) -> bool {

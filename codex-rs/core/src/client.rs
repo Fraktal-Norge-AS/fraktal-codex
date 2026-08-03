@@ -1411,10 +1411,13 @@ impl ModelClientSession {
         let mut pending_retry = PendingUnauthorizedRetry::default();
         loop {
             let client_setup = self.client.current_client_setup().await?;
-            let transport = ReqwestTransport::new(build_reqwest_client());
+            let transport = self
+                .client
+                .build_api_transport(&client_setup.api_provider, CHAT_COMPLETIONS_ENDPOINT)?;
             let request_auth_context = AuthRequestTelemetryContext::new(
                 client_setup.auth.as_ref().map(CodexAuth::auth_mode),
                 client_setup.api_auth.as_ref(),
+                client_setup.agent_identity_telemetry.clone(),
                 pending_retry,
             );
             let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
@@ -1426,15 +1429,13 @@ impl ModelClientSession {
 
             let instructions = prompt.base_instructions.text.clone();
             let mut input = prompt.get_formatted_input_for_request(model_info.use_responses_lite);
-            if !self.client.state.provider.info().is_openai() {
-                input.iter_mut().for_each(ResponseItem::clear_metadata);
-            }
+            self.client.prepare_response_items_for_request(&mut input);
             let tools_json = create_tools_json_for_chat_completions_api(&prompt.tools)?;
             let mut request =
                 ApiChatRequestBuilder::new(&model_info.slug, &instructions, &input, &tools_json)
                     .session_source(Some(self.client.state.session_source.clone()))
                     .build(&client_setup.api_provider)
-                    .map_err(map_api_error)?;
+                    .map_err(|err| self.client.state.provider.map_api_error(err))?;
 
             let inference_trace_attempt = inference_trace.start_attempt();
             inference_trace_attempt.add_request_headers(&mut request.headers);
@@ -1454,6 +1455,7 @@ impl ModelClientSession {
                         stream,
                         session_telemetry.clone(),
                         inference_trace_attempt,
+                        Arc::clone(&self.client.state.provider),
                     );
                     return Ok(stream);
                 }
@@ -1472,6 +1474,7 @@ impl ModelClientSession {
                             unauthorized_transport,
                             &mut auth_recovery,
                             session_telemetry,
+                            &self.client.state.provider,
                         )
                         .await?,
                     );
@@ -1480,7 +1483,7 @@ impl ModelClientSession {
                 Err(err) => {
                     let response_debug_context =
                         extract_response_debug_context_from_api_error(&err);
-                    let err = map_api_error(err);
+                    let err = self.client.state.provider.map_api_error(err);
                     inference_trace_attempt.record_failed(
                         &err,
                         response_debug_context.request_id.as_deref(),

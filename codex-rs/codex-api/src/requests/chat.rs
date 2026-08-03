@@ -16,6 +16,7 @@ use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::ResponseItemId;
 use codex_protocol::protocol::SessionSource;
 use http::HeaderMap;
 use serde_json::Value;
@@ -173,6 +174,9 @@ impl<'a> ChatRequestBuilder<'a> {
                                     json!({"type":"image_url","image_url": {"url": image_url}}),
                                 );
                             }
+                            // Chat Completions has no audio input part in the
+                            // shape we emit; drop it rather than send junk.
+                            ContentItem::InputAudio { .. } => {}
                         }
                     }
 
@@ -224,7 +228,7 @@ impl<'a> ChatRequestBuilder<'a> {
                 } => {
                     let reasoning = reasoning_by_anchor_index.get(&idx).map(String::as_str);
                     let tool_call = json!({
-                        "id": id.clone().unwrap_or_default(),
+                        "id": id.as_ref().map(ResponseItemId::as_str).unwrap_or_default(),
                         "type": "local_shell_call",
                         "status": status,
                         "action": action,
@@ -300,7 +304,10 @@ fn function_output_content_value(output: &FunctionCallOutputPayload) -> Value {
                     FunctionCallOutputContentItem::InputImage { image_url, .. } => {
                         Some(json!({"type":"image_url","image_url": {"url": image_url}}))
                     }
-                    FunctionCallOutputContentItem::EncryptedContent { .. } => None,
+                    // Chat Completions tool results accept no audio part, and
+                    // encrypted content has no chat representation at all.
+                    FunctionCallOutputContentItem::InputAudio { .. }
+                    | FunctionCallOutputContentItem::EncryptedContent { .. } => None,
                 })
                 .collect();
             json!(mapped)
@@ -380,7 +387,7 @@ mod tests {
                 text: "hi".to_string(),
             }],
             phase: None,
-            metadata: None,
+            internal_chat_message_metadata_passthrough: None,
         }];
         let req = ChatRequestBuilder::new("gpt-test", "inst", &prompt_input, &[])
             .conversation_id(Some("conv-1".into()))
@@ -408,12 +415,13 @@ mod tests {
                     text: "read these".to_string(),
                 }],
                 phase: None,
-                metadata: None,
+                internal_chat_message_metadata_passthrough: None,
             },
             ResponseItem::FunctionCall {
                 id: None,
                 namespace: None,
-                metadata: None,
+                encrypted_function_args: None,
+                internal_chat_message_metadata_passthrough: None,
                 name: "read_file".to_string(),
                 arguments: r#"{"path":"a.txt"}"#.to_string(),
                 call_id: "call-a".to_string(),
@@ -421,7 +429,8 @@ mod tests {
             ResponseItem::FunctionCall {
                 id: None,
                 namespace: None,
-                metadata: None,
+                encrypted_function_args: None,
+                internal_chat_message_metadata_passthrough: None,
                 name: "read_file".to_string(),
                 arguments: r#"{"path":"b.txt"}"#.to_string(),
                 call_id: "call-b".to_string(),
@@ -429,34 +438,38 @@ mod tests {
             ResponseItem::FunctionCall {
                 id: None,
                 namespace: None,
-                metadata: None,
+                encrypted_function_args: None,
+                internal_chat_message_metadata_passthrough: None,
                 name: "read_file".to_string(),
                 arguments: r#"{"path":"c.txt"}"#.to_string(),
                 call_id: "call-c".to_string(),
             },
             ResponseItem::FunctionCallOutput {
+                id: None,
                 call_id: "call-a".to_string(),
                 output: FunctionCallOutputPayload {
                     body: FunctionCallOutputBody::Text("A".to_string()),
                     success: None,
                 },
-                metadata: None,
+                internal_chat_message_metadata_passthrough: None,
             },
             ResponseItem::FunctionCallOutput {
+                id: None,
                 call_id: "call-b".to_string(),
                 output: FunctionCallOutputPayload {
                     body: FunctionCallOutputBody::Text("B".to_string()),
                     success: None,
                 },
-                metadata: None,
+                internal_chat_message_metadata_passthrough: None,
             },
             ResponseItem::FunctionCallOutput {
+                id: None,
                 call_id: "call-c".to_string(),
                 output: FunctionCallOutputPayload {
                     body: FunctionCallOutputBody::Text("C".to_string()),
                     success: None,
                 },
-                metadata: None,
+                internal_chat_message_metadata_passthrough: None,
             },
         ];
 

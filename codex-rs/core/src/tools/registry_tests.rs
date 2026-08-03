@@ -647,7 +647,7 @@ fn resolve_fuzzy_mcp_name_tolerates_flat_and_mangled_calls() {
     let handler = Arc::new(TestHandler {
         tool_name: registered.clone(),
     }) as Arc<dyn CoreToolRuntime>;
-    let registry = ToolRegistry::new(HashMap::from([(registered.clone(), handler)]));
+    let registry = ToolRegistry::from_tools([handler]);
 
     // gemma: correct name but flattened into `name` with no namespace field.
     let flat = codex_tools::ToolName::plain("mcp__wren_charts__list_models");
@@ -675,7 +675,7 @@ fn resolve_fuzzy_mcp_name_declines_ambiguous_matches() {
     let hb = Arc::new(TestHandler {
         tool_name: b.clone(),
     }) as Arc<dyn CoreToolRuntime>;
-    let registry = ToolRegistry::new(HashMap::from([(a, ha), (b, hb)]));
+    let registry = ToolRegistry::from_tools([ha, hb]);
 
     let mangled = codex_tools::ToolName::plain("mcp__srv.do.it");
     assert_eq!(registry.resolve_fuzzy_mcp_name(&mangled), None);

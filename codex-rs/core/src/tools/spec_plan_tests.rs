@@ -2260,7 +2260,12 @@ async fn flatten_mcp_tools_exposes_flat_functions_end_to_end() {
     let flattened = probe_with(
         |turn| set_feature(turn, Feature::FlattenMcpTools, /*enabled*/ true),
         ToolPlanInputs {
-            mcp_tools: Some(vec![mcp_tool("direct", "mcp__direct", "lookup")]),
+            tool_runtimes: vec![mcp_runtime(
+                "direct",
+                "mcp__direct",
+                "lookup",
+                ToolExposure::Direct,
+            )],
             ..ToolPlanInputs::default()
         },
     )
