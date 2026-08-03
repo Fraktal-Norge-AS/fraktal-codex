@@ -292,6 +292,9 @@ fn proto_string_map(values: HashMap<String, String>) -> proto::StringMap {
 fn proto_wire_api(wire_api: WireApi) -> proto::WireApi {
     match wire_api {
         WireApi::Responses => proto::WireApi::Responses,
+        // [fraktal] `chat` is a local-only wire API; the remote thread-config
+        // proto surface has no corresponding variant.
+        WireApi::Chat => unreachable!("chat wire API is not representable in the remote proto"),
     }
 }
 

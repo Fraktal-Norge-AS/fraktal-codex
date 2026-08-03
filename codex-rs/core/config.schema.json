@@ -4803,12 +4803,19 @@
       "type": "object"
     },
     "WireApi": {
-      "description": "Wire protocol that the provider speaks.",
+      "description": "Wire protocol that the provider speaks. OpenAI itself (and a handful of others) expose the modern *Responses* API, whereas most third-party services only implement the classic Chat Completions JSON schema. The two protocols use different request/response shapes and cannot be auto-detected at runtime, so each provider entry must declare which one it expects.\n\n[fraktal] Upstream removed `chat` (see discussion #7782) to go Responses-only. We restore it so Fraktal can talk directly to OpenAI-compatible Chat Completions providers (OpenRouter, DeepInfra, Groq, …) without a translation proxy.",
       "oneOf": [
         {
           "description": "The Responses API exposed by OpenAI at `/v1/responses`.",
           "enum": [
             "responses"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Regular Chat Completions compatible with `/v1/chat/completions`.",
+          "enum": [
+            "chat"
           ],
           "type": "string"
         }

@@ -33,6 +33,8 @@ use std::sync::atomic::Ordering;
 use codex_api::AgentIdentityTelemetry;
 use codex_api::ApiError;
 use codex_api::AuthProvider;
+use codex_api::ChatClient as ApiChatClient;
+use codex_api::ChatRequestBuilder as ApiChatRequestBuilder;
 use codex_api::CompactClient as ApiCompactClient;
 use codex_api::CompactionInput as ApiCompactionInput;
 use codex_api::Compression;
@@ -88,6 +90,7 @@ use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout_trace::CompactionTraceContext;
 use codex_rollout_trace::InferenceTraceAttempt;
 use codex_rollout_trace::InferenceTraceContext;
+use codex_tools::create_tools_json_for_chat_completions_api;
 use codex_tools::create_tools_json_for_responses_api;
 use codex_tools::create_tools_raw_json_for_responses_api;
 use eventsource_stream::Event;
@@ -157,6 +160,8 @@ const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER: &str =
     "x-openai-internal-codex-responses-lite";
 const REALTIME_CALLS_ENDPOINT: &str = "/realtime/calls";
 const RESPONSES_ENDPOINT: &str = "/responses";
+// [fraktal] Chat Completions transport route (restored alongside the `chat` wire API).
+const CHAT_COMPLETIONS_ENDPOINT: &str = "/chat/completions";
 const RESPONSES_COMPACT_ENDPOINT: &str = "/responses/compact";
 // `/responses/compact` is unary, so the timeout covers the full response rather than one idle
 // period between stream events.
@@ -1381,6 +1386,112 @@ impl ModelClientSession {
         }
     }
 
+    /// Streams a turn via the OpenAI Chat Completions API.
+    ///
+    /// [fraktal] Used when the provider is configured with `wire_api = "chat"`.
+    /// This path only supports plain chat + tool-calling: there is no WebSocket
+    /// transport, no server-side reasoning/compaction, and no `output_schema`.
+    async fn stream_chat_completions(
+        &self,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        inference_trace: &InferenceTraceContext,
+    ) -> Result<ResponseStream> {
+        if prompt.output_schema.is_some() {
+            return Err(CodexErr::UnsupportedOperation(
+                "output_schema is not supported for the Chat Completions API".to_string(),
+            ));
+        }
+
+        let auth_manager = self.client.state.provider.auth_manager();
+        let mut auth_recovery = auth_manager
+            .as_ref()
+            .map(AuthManager::unauthorized_recovery);
+        let mut pending_retry = PendingUnauthorizedRetry::default();
+        loop {
+            let client_setup = self.client.current_client_setup().await?;
+            let transport = ReqwestTransport::new(build_reqwest_client());
+            let request_auth_context = AuthRequestTelemetryContext::new(
+                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+                client_setup.api_auth.as_ref(),
+                pending_retry,
+            );
+            let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
+                session_telemetry,
+                request_auth_context,
+                RequestRouteTelemetry::for_endpoint(CHAT_COMPLETIONS_ENDPOINT),
+                self.client.state.auth_env_telemetry.clone(),
+            );
+
+            let instructions = prompt.base_instructions.text.clone();
+            let mut input = prompt.get_formatted_input_for_request(model_info.use_responses_lite);
+            if !self.client.state.provider.info().is_openai() {
+                input.iter_mut().for_each(ResponseItem::clear_metadata);
+            }
+            let tools_json = create_tools_json_for_chat_completions_api(&prompt.tools)?;
+            let mut request =
+                ApiChatRequestBuilder::new(&model_info.slug, &instructions, &input, &tools_json)
+                    .session_source(Some(self.client.state.session_source.clone()))
+                    .build(&client_setup.api_provider)
+                    .map_err(map_api_error)?;
+
+            let inference_trace_attempt = inference_trace.start_attempt();
+            inference_trace_attempt.add_request_headers(&mut request.headers);
+            inference_trace_attempt.record_started(&request.body);
+
+            let client = ApiChatClient::new(
+                transport,
+                client_setup.api_provider,
+                client_setup.api_auth,
+            )
+            .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            let stream_result = client.stream_request(request).await;
+
+            match stream_result {
+                Ok(stream) => {
+                    let (stream, _) = map_response_stream(
+                        stream,
+                        session_telemetry.clone(),
+                        inference_trace_attempt,
+                    );
+                    return Ok(stream);
+                }
+                Err(ApiError::Transport(
+                    unauthorized_transport @ TransportError::Http { status, .. },
+                )) if status == StatusCode::UNAUTHORIZED => {
+                    let response_debug_context =
+                        extract_response_debug_context(&unauthorized_transport);
+                    inference_trace_attempt.record_failed(
+                        &unauthorized_transport,
+                        response_debug_context.request_id.as_deref(),
+                        /*output_items*/ &[],
+                    );
+                    pending_retry = PendingUnauthorizedRetry::from_recovery(
+                        handle_unauthorized(
+                            unauthorized_transport,
+                            &mut auth_recovery,
+                            session_telemetry,
+                        )
+                        .await?,
+                    );
+                    continue;
+                }
+                Err(err) => {
+                    let response_debug_context =
+                        extract_response_debug_context_from_api_error(&err);
+                    let err = map_api_error(err);
+                    inference_trace_attempt.record_failed(
+                        &err,
+                        response_debug_context.request_id.as_deref(),
+                        /*output_items*/ &[],
+                    );
+                    return Err(err);
+                }
+            }
+        }
+    }
+
     /// Streams a turn via the OpenAI Responses API.
     ///
     /// Handles reasoning summaries, verbosity, and the `text` controls used for output schemas.
@@ -1843,6 +1954,18 @@ impl ModelClientSession {
                     summary,
                     service_tier,
                     responses_metadata,
+                    inference_trace,
+                )
+                .await
+            }
+            // [fraktal] Restored Chat Completions transport for OpenAI-compatible
+            // providers (OpenRouter, DeepInfra, …) that do not speak Responses.
+            // No WebSocket/reasoning/compaction — those are Responses-only.
+            WireApi::Chat => {
+                self.stream_chat_completions(
+                    prompt,
+                    model_info,
+                    session_telemetry,
                     inference_trace,
                 )
                 .await

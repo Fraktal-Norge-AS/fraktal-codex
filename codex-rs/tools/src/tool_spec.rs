@@ -96,6 +96,44 @@ pub fn create_tools_raw_json_for_responses_api(
     serde_json::value::to_raw_value(tools).map(Arc::from)
 }
 
+/// Returns JSON values compatible with Function Calling in the Chat
+/// Completions API:
+/// https://platform.openai.com/docs/guides/function-calling?api-mode=chat
+///
+/// [fraktal] Restored alongside the `chat` wire API so Chat-Completions
+/// providers (OpenRouter, DeepInfra, …) receive tools in the shape they
+/// expect. Built by rewriting the Responses-API tool JSON into the
+/// `{ "type": "function", "function": { … } }` envelope.
+pub fn create_tools_json_for_chat_completions_api(
+    tools: &[ToolSpec],
+) -> Result<Vec<Value>, serde_json::Error> {
+    let responses_api_tools_json = create_tools_json_for_responses_api(tools)?;
+    let tools_json = responses_api_tools_json
+        .into_iter()
+        .filter_map(|mut tool| {
+            if tool.get("type") != Some(&Value::String("function".to_string())) {
+                return None;
+            }
+
+            let map = tool.as_object_mut()?;
+            let name = map
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            // The chat envelope nests the spec under `function`; drop the
+            // Responses-style top-level `type` before re-wrapping.
+            map.remove("type");
+            Some(serde_json::json!({
+                "type": "function",
+                "name": name,
+                "function": map,
+            }))
+        })
+        .collect::<Vec<Value>>();
+    Ok(tools_json)
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ResponsesApiWebSearchFilters {
     #[serde(skip_serializing_if = "Option::is_none")]
