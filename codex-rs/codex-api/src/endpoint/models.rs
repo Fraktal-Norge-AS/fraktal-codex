@@ -94,13 +94,12 @@ impl<T: HttpTransport> ModelsClient<T> {
             .execute(Method::GET, Self::path(), extra_headers, /*body*/ None)
             .await?;
 
-        let body: serde_json::Value =
-            serde_json::from_slice(&resp.body).map_err(|e| {
-                ApiError::Stream(format!(
-                    "failed to decode models response: {e}; body: {}",
-                    String::from_utf8_lossy(&resp.body)
-                ))
-            })?;
+        let body: serde_json::Value = serde_json::from_slice(&resp.body).map_err(|e| {
+            ApiError::Stream(format!(
+                "failed to decode models response: {e}; body: {}",
+                String::from_utf8_lossy(&resp.body)
+            ))
+        })?;
 
         let ids = body
             .get("data")

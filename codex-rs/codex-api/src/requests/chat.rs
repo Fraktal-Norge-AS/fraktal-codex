@@ -10,13 +10,13 @@ use crate::provider::Provider;
 use crate::requests::headers::build_session_headers;
 use crate::requests::headers::insert_header;
 use crate::requests::headers::subagent_header;
+use codex_protocol::ResponseItemId;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::ResponseItemId;
 use codex_protocol::protocol::SessionSource;
 use http::HeaderMap;
 use serde_json::Value;
@@ -235,7 +235,9 @@ impl<'a> ChatRequestBuilder<'a> {
                     });
                     push_tool_call_message(&mut messages, tool_call, reasoning);
                 }
-                ResponseItem::FunctionCallOutput { call_id, output, .. } => {
+                ResponseItem::FunctionCallOutput {
+                    call_id, output, ..
+                } => {
                     messages.push(json!({
                         "role": "tool",
                         "tool_call_id": call_id,
@@ -256,7 +258,9 @@ impl<'a> ChatRequestBuilder<'a> {
                     let reasoning = reasoning_by_anchor_index.get(&idx).map(String::as_str);
                     push_tool_call_message(&mut messages, tool_call, reasoning);
                 }
-                ResponseItem::CustomToolCallOutput { call_id, output, .. } => {
+                ResponseItem::CustomToolCallOutput {
+                    call_id, output, ..
+                } => {
                     messages.push(json!({
                         "role": "tool",
                         "tool_call_id": call_id,
@@ -331,7 +335,10 @@ fn push_tool_call_message(messages: &mut Vec<Value>, tool_call: Value, reasoning
                 }
                 existing.push_str(reasoning);
             } else {
-                obj.insert("reasoning".to_string(), Value::String(reasoning.to_string()));
+                obj.insert(
+                    "reasoning".to_string(),
+                    Value::String(reasoning.to_string()),
+                );
             }
         }
         return;

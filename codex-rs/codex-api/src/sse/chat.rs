@@ -424,7 +424,12 @@ mod tests {
         let reader = ReaderStream::new(std::io::Cursor::new(body.to_string()))
             .map_err(|err| codex_client::TransportError::Network(err.to_string()));
         let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent, ApiError>>(16);
-        tokio::spawn(process_chat_sse(reader, tx, Duration::from_millis(1000), None));
+        tokio::spawn(process_chat_sse(
+            reader,
+            tx,
+            Duration::from_millis(1000),
+            None,
+        ));
 
         let mut out = Vec::new();
         while let Some(ev) = rx.recv().await {

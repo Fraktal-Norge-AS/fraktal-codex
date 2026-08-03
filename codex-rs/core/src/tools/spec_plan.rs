@@ -319,7 +319,10 @@ fn build_model_visible_specs(
     if flatten_mcp_tools_enabled(turn_context) {
         // [fraktal] Flatten namespaces into individual function tools instead of
         // dropping them, so chat-completions / local models can call MCP tools.
-        merged.into_iter().flat_map(flatten_namespace_spec).collect()
+        merged
+            .into_iter()
+            .flat_map(flatten_namespace_spec)
+            .collect()
     } else {
         merged
             .into_iter()

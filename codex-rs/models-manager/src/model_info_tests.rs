@@ -4,8 +4,8 @@ use codex_protocol::config_types::Personality;
 use codex_protocol::openai_models::ApprovalMessages;
 use codex_protocol::openai_models::AutoReviewMessages;
 use codex_protocol::openai_models::CollaborationModeMessages;
-use codex_protocol::openai_models::PermissionMessages;
 use codex_protocol::openai_models::ModelVisibility;
+use codex_protocol::openai_models::PermissionMessages;
 use pretty_assertions::assert_eq;
 
 fn config_with_personality(personality: Option<Personality>) -> ModelsManagerConfig {

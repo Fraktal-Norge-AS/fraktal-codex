@@ -4018,14 +4018,20 @@ fn resolve(requested: &str, keys: &[&str]) -> Option<String> {
 #[test]
 fn resolve_server_key_prefers_exact_match() {
     let keys = ["wren-charts", "other"];
-    assert_eq!(resolve("wren-charts", &keys).as_deref(), Some("wren-charts"));
+    assert_eq!(
+        resolve("wren-charts", &keys).as_deref(),
+        Some("wren-charts")
+    );
 }
 
 #[test]
 fn resolve_server_key_matches_separator_variants() {
     let keys = ["wren-charts"];
     // Model echoed underscores instead of the configured hyphen.
-    assert_eq!(resolve("wren_charts", &keys).as_deref(), Some("wren-charts"));
+    assert_eq!(
+        resolve("wren_charts", &keys).as_deref(),
+        Some("wren-charts")
+    );
 }
 
 #[test]

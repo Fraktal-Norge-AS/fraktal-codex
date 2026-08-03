@@ -634,9 +634,18 @@ fn test_invocation(
 fn canonical_mcp_name_collapses_separators() {
     // Flattened, dot, and colon variants all canonicalize to the same key.
     let canonical = canonical_mcp_name("mcp__wren_charts__list_models");
-    assert_eq!(canonical_mcp_name("mcp__wren_charts.list_models"), canonical);
-    assert_eq!(canonical_mcp_name("mcp__wren_charts:list_models"), canonical);
-    assert_eq!(canonical_mcp_name("mcp__wren-charts__list_models"), canonical);
+    assert_eq!(
+        canonical_mcp_name("mcp__wren_charts.list_models"),
+        canonical
+    );
+    assert_eq!(
+        canonical_mcp_name("mcp__wren_charts:list_models"),
+        canonical
+    );
+    assert_eq!(
+        canonical_mcp_name("mcp__wren-charts__list_models"),
+        canonical
+    );
 }
 
 #[test]
@@ -651,13 +660,19 @@ fn resolve_fuzzy_mcp_name_tolerates_flat_and_mangled_calls() {
 
     // gemma: correct name but flattened into `name` with no namespace field.
     let flat = codex_tools::ToolName::plain("mcp__wren_charts__list_models");
-    assert_eq!(registry.resolve_fuzzy_mcp_name(&flat), Some(registered.clone()));
+    assert_eq!(
+        registry.resolve_fuzzy_mcp_name(&flat),
+        Some(registered.clone())
+    );
 
     // qwen: separator mangled to `.` / `:`.
     let dotted = codex_tools::ToolName::plain("mcp__wren_charts.list_models");
-    assert_eq!(registry.resolve_fuzzy_mcp_name(&dotted), Some(registered.clone()));
+    assert_eq!(
+        registry.resolve_fuzzy_mcp_name(&dotted),
+        Some(registered.clone())
+    );
     let coloned = codex_tools::ToolName::plain("mcp__wren_charts:list_models");
-    assert_eq!(registry.resolve_fuzzy_mcp_name(&coloned), Some(registered.clone()));
+    assert_eq!(registry.resolve_fuzzy_mcp_name(&coloned), Some(registered));
 
     // Non-MCP names are never fuzzy-resolved.
     let builtin = codex_tools::ToolName::plain("shell_command");
@@ -669,12 +684,8 @@ fn resolve_fuzzy_mcp_name_declines_ambiguous_matches() {
     // Two distinct tools that canonicalize identically must not be guessed.
     let a = codex_tools::ToolName::namespaced("mcp__srv__", "do_it");
     let b = codex_tools::ToolName::namespaced("mcp__srv__", "do__it");
-    let ha = Arc::new(TestHandler {
-        tool_name: a.clone(),
-    }) as Arc<dyn CoreToolRuntime>;
-    let hb = Arc::new(TestHandler {
-        tool_name: b.clone(),
-    }) as Arc<dyn CoreToolRuntime>;
+    let ha = Arc::new(TestHandler { tool_name: a }) as Arc<dyn CoreToolRuntime>;
+    let hb = Arc::new(TestHandler { tool_name: b }) as Arc<dyn CoreToolRuntime>;
     let registry = ToolRegistry::from_tools([ha, hb]);
 
     let mangled = codex_tools::ToolName::plain("mcp__srv.do.it");

@@ -57,7 +57,11 @@ async fn disable_image_inputs_strips_image_modality() {
     let default_info = manager
         .get_model_info("unknown-local-model", &ModelsManagerConfig::default())
         .await;
-    assert!(default_info.input_modalities.contains(&InputModality::Image));
+    assert!(
+        default_info
+            .input_modalities
+            .contains(&InputModality::Image)
+    );
 
     // With the override, Image is removed (text retained).
     let stripped_info = manager

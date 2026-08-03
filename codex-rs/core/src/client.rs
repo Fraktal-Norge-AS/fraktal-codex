@@ -1441,12 +1441,9 @@ impl ModelClientSession {
             inference_trace_attempt.add_request_headers(&mut request.headers);
             inference_trace_attempt.record_started(&request.body);
 
-            let client = ApiChatClient::new(
-                transport,
-                client_setup.api_provider,
-                client_setup.api_auth,
-            )
-            .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            let client =
+                ApiChatClient::new(transport, client_setup.api_provider, client_setup.api_auth)
+                    .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
             let stream_result = client.stream_request(request).await;
 
             match stream_result {
@@ -1965,13 +1962,8 @@ impl ModelClientSession {
             // providers (OpenRouter, DeepInfra, …) that do not speak Responses.
             // No WebSocket/reasoning/compaction — those are Responses-only.
             WireApi::Chat => {
-                self.stream_chat_completions(
-                    prompt,
-                    model_info,
-                    session_telemetry,
-                    inference_trace,
-                )
-                .await
+                self.stream_chat_completions(prompt, model_info, session_telemetry, inference_trace)
+                    .await
             }
         }
     }
