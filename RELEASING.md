@@ -119,30 +119,52 @@ Optional end-to-end checks when the helper + config are in place:
 ## CI
 
 `.github/workflows/fraktal-windows.yml` is the fork's only active workflow.
-It runs on pushes to `fraktal/main`, PRs targeting it, `fraktal-v*` tags, and
-manual dispatch. Two jobs, both on GitHub-hosted `windows-latest`:
+Its purpose is to produce and publish `fraktal.exe`, not to re-prove upstream's
+test suite.
 
-- **Lint and test** — `cargo fmt`, then clippy and `--lib` tests over exactly
-  the crates the fork patches.
-- **Build fraktal.exe** — release build, a smoke test asserting the binary
-  starts and reports the rebranded name, then uploads
-  `fraktal-x86_64-pc-windows-msvc` as an artifact (30-day retention).
+- **build** (`windows-latest`) — runs on pushes to `fraktal/main`, PRs, tags
+  and manual dispatch. Tests the fast fork-owned crates, builds the release
+  binary, smoke-tests it, and uploads
+  `fraktal-x86_64-pc-windows-msvc` (binary + `.sha256`, 30-day retention).
+- **publish** (`ubuntu-24.04`) — only on `fraktal-v*` tags. Downloads that
+  artifact and attaches it to a GitHub Release with generated notes.
 
-Things that will bite you if you change it:
+### Cutting a release
+
+```sh
+git tag fraktal-v0.1.0
+git push origin fraktal-v0.1.0
+```
+
+The tag drives three things, so the format is load-bearing:
+
+1. `fraktal doctor` fetches the latest release and strips the **`fraktal-v`**
+   prefix (`cli/src/doctor/updates.rs`). A differently-named tag makes the
+   update check fail to parse.
+2. The build stamps that version into `[workspace.package]` before compiling.
+   Without it the binary reports the checked-in `0.0.0`, which is older than
+   every release, so `doctor` would nag forever.
+3. The smoke test asserts `fraktal --version` matches the stamped version, so
+   a broken stamp fails the build instead of shipping.
+
+### Things that will bite you
 
 - **Never use `--workspace`.** It pulls in `code-mode-runtime` and `v8-poc`,
   and the `v8` crate has no prebuilt archive for `x86_64-pc-windows-msvc`.
-  The crate list is explicit for this reason; regenerate it after a rebase
-  that touches new crates:
-  `git diff --name-only upstream/main..HEAD -- 'codex-rs/**' | sed 's#codex-rs/\([^/]*\)/.*#\1#' | sort -u`
 - **`RUST_MIN_STACK` is set workflow-wide.** Upstream's async tests overflow
-  the default thread stack on Windows and abort the whole test binary with
+  the default thread stack on Windows and abort the test binary with
   `STATUS_STACK_OVERFLOW`.
-- **`codex-tui` is linted but not tested**, pending the insta snapshot
-  regeneration in `FRAKTAL_TODO.md`. Add it to the test list once that lands.
+- **Testing is intentionally a thin slice** — the fork-owned crates that
+  compile quickly. `codex-core`, `codex-app-server` and `codex-tui` are not
+  tested here; the release build still compiles them, so a compile break is
+  caught, but a *behavioural* regression in fork code inside `codex-core`
+  (the MCP flattening and tolerant tool-name resolution) would not be. Run
+  the fuller command in "Smoke test" above locally after a rebase.
+- **`codex-tui` also has ~19 stale insta snapshots** (`FRAKTAL_TODO.md`), so
+  its tests would fail today regardless.
 - Only the cargo registry is cached, not `target/`. A release `target/` for
-  this workspace is far larger than the 10 GB repo cache budget, so caching it
-  would thrash. Expect roughly an hour for the build job.
+  this workspace far exceeds the 10 GB repo cache budget. Expect roughly an
+  hour for the build job.
 
 Upstream's `blocking-ci` family stays gated off. It fans out to Bazel, the
 SDK, cargo-deny and a multi-platform matrix that need secrets and self-hosted

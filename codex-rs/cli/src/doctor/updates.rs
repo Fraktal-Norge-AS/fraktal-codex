@@ -160,8 +160,11 @@ fn fetch_latest_github_release_version() -> Result<String, String> {
     }
 
     let info = http_get_json::<ReleaseInfo>(GITHUB_LATEST_RELEASE_URL)?;
+    // [fraktal] Our releases are tagged `fraktal-v<semver>`; upstream used
+    // `rust-v`. The release workflow stamps the same version into
+    // `CARGO_PKG_VERSION`, which is what this is compared against.
     info.tag_name
-        .strip_prefix("rust-v")
+        .strip_prefix("fraktal-v")
         .map(str::to_string)
         .ok_or_else(|| format!("failed to parse latest tag {}", info.tag_name))
 }

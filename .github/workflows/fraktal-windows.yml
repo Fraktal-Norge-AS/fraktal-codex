@@ -1,13 +1,16 @@
 name: fraktal-windows
 
-# [fraktal] The fork's own CI. Upstream's `blocking-ci` family is deliberately
-# not used: it fans out to Bazel, the SDK, cargo-deny and a multi-platform
-# matrix, much of which needs secrets and self-hosted runner groups this fork
-# does not have. It also only triggers on `main`, while our work lands on
-# `fraktal/main`, which is why nothing has ever run here.
+# [fraktal] The fork's own CI. Its job is to produce the one artifact we ship —
+# `fraktal.exe` for Windows — and publish it where colleagues can download it.
 #
-# This builds the one artifact we ship — `fraktal.exe` for Windows — and runs
-# lint plus tests for the crates the fork actually modifies.
+# Upstream's `blocking-ci` family stays gated off: it fans out to Bazel, the
+# SDK, cargo-deny and a multi-platform matrix needing secrets and self-hosted
+# runner groups this fork does not have, and it only triggers on `main` while
+# our work lands on `fraktal/main`.
+#
+# Testing here is deliberately thin. Upstream already proves its own suite; what
+# CI must catch is breakage in the code the fork *adds*, which upstream never
+# exercises. So this runs the fast fork-owned crates only — see RELEASING.md.
 
 on:
   push:
@@ -18,7 +21,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Supersede in-flight runs for a branch, but never cancel a tag build.
+  # Supersede in-flight branch runs, but never cancel a release build.
   group: fraktal-windows-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
@@ -32,65 +35,6 @@ env:
   RUST_MIN_STACK: "67108864"
 
 jobs:
-  check:
-    name: Lint and test
-    runs-on: windows-latest
-    timeout-minutes: 90
-    defaults:
-      run:
-        shell: bash
-        working-directory: codex-rs
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
-        with:
-          components: clippy, rustfmt
-
-      - name: Cache cargo registry
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-          key: fraktal-cargo-${{ runner.os }}-${{ hashFiles('codex-rs/Cargo.lock') }}
-          restore-keys: fraktal-cargo-${{ runner.os }}-
-
-      - name: cargo fmt
-        run: cargo fmt --all -- --check
-
-      # `--workspace` is intentionally avoided: it pulls in `code-mode-runtime`
-      # and `v8-poc`, and the `v8` crate has no prebuilt archive for
-      # x86_64-pc-windows-msvc, so the build fails before reaching our code.
-      # This list is every crate the fork patches — regenerate it with:
-      #   git diff --name-only upstream/main..HEAD -- 'codex-rs/**' \
-      #     | sed 's#codex-rs/\([^/]*\)/.*#\1#' | sort -u
-      - name: cargo clippy
-        run: |
-          cargo clippy --locked --all-targets \
-            -p codex-cli -p codex-core -p codex-api -p codex-tools \
-            -p codex-config -p codex-mcp -p codex-login -p codex-features \
-            -p codex-otel -p codex-app-server -p codex-tui \
-            -p codex-model-provider -p codex-model-provider-info \
-            -p codex-models-manager -p codex-utils-home-dir
-
-      # NOTE: `codex-tui` is linted above but deliberately NOT tested here.
-      # The splash rebrand shifted ~19 insta snapshots that have not been
-      # regenerated yet, so `cargo test -p codex-tui` fails on known-stale
-      # expectations rather than real breakage. Tracked in FRAKTAL_TODO.md;
-      # add `-p codex-tui` below once `cargo insta accept -p codex-tui` lands.
-      - name: cargo test
-        run: |
-          cargo test --locked --lib \
-            -p codex-core -p codex-api -p codex-tools \
-            -p codex-config -p codex-mcp -p codex-login -p codex-features \
-            -p codex-otel -p codex-app-server \
-            -p codex-model-provider -p codex-model-provider-info \
-            -p codex-models-manager -p codex-utils-home-dir
-
   build:
     name: Build fraktal.exe
     runs-on: windows-latest
@@ -116,20 +60,80 @@ jobs:
           key: fraktal-cargo-${{ runner.os }}-${{ hashFiles('codex-rs/Cargo.lock') }}
           restore-keys: fraktal-cargo-${{ runner.os }}-
 
-      - name: cargo build --release
+      # The workspace version is checked in as 0.0.0. A published binary that
+      # reports 0.0.0 would always look older than the latest release, so
+      # `fraktal doctor` would nag forever. Stamp the tag's version instead.
+      - name: Stamp version from tag
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/fraktal-v* ]]; then
+            version="${GITHUB_REF#refs/tags/fraktal-v}"
+            sed -i "0,/^version = \"0.0.0\"$/s//version = \"${version}\"/" Cargo.toml
+            grep -q "^version = \"${version}\"$" Cargo.toml
+            echo "Stamped workspace version ${version}"
+          else
+            version="0.0.0"
+            echo "Untagged build; leaving version at ${version}"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # Thin slice: the fork's own crates that compile quickly. `codex-core`,
+      # `codex-tui` and `codex-app-server` are excluded to keep this fast — the
+      # release build below still compiles them, so a compile break is caught.
+      # `codex-tui` additionally has ~19 stale insta snapshots (FRAKTAL_TODO.md).
+      - name: Test fork-owned crates
+        run: |
+          cargo test --locked --lib \
+            -p codex-api -p codex-tools -p codex-features \
+            -p codex-model-provider-info -p codex-models-manager \
+            -p codex-utils-home-dir
+
+      # `--workspace` is never usable here: it pulls `code-mode-runtime` and
+      # `v8-poc`, and the `v8` crate has no prebuilt archive for
+      # x86_64-pc-windows-msvc.
+      - name: Build release binary
         run: cargo build --release --locked -p codex-cli --bin fraktal
 
-      # Catches a binary that links but cannot start, and asserts the rebrand
-      # (clap takes the version line from `name`, not `bin_name`).
+      # Catches a binary that links but cannot start, and asserts both the
+      # rebrand and that the version stamp actually took effect.
       - name: Smoke test
         run: |
           ./target/release/fraktal.exe --version | tee version.txt
-          grep -q '^fraktal ' version.txt
+          grep -q "^fraktal ${{ steps.version.outputs.version }}$" version.txt
           ./target/release/fraktal.exe --help | head -1 | grep -q '^Fraktal CLI'
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/release/fraktal.exe dist/fraktal.exe
+          sha256sum dist/fraktal.exe | sed 's# .*/# #' > dist/fraktal.exe.sha256
+          cat dist/fraktal.exe.sha256
 
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v5.0.0
         with:
           name: fraktal-x86_64-pc-windows-msvc
-          path: codex-rs/target/release/fraktal.exe
+          path: codex-rs/dist/*
           if-no-files-found: error
           retention-days: 30
+
+  publish:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/fraktal-v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v6.0.0
+        with:
+          name: fraktal-x86_64-pc-windows-msvc
+          path: dist
+
+      # `fraktal doctor` reads the latest release tag and strips `fraktal-v`,
+      # so the tag format is load-bearing, not cosmetic.
+      - uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.4.1
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
