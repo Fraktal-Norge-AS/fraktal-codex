@@ -80,26 +80,14 @@ pub async fn process_chat_sse<S>(
     let mut tool_call_index_by_id: HashMap<String, usize> = HashMap::new();
     let mut next_tool_call_index = 0usize;
     let mut last_tool_call_index: Option<usize> = None;
-    let mut assistant_item: Option<ResponseItem> = None;
-    let mut reasoning_item: Option<ResponseItem> = None;
+    let mut open_item: Option<OpenItem> = None;
     let mut completed_sent = false;
 
     async fn flush_and_complete(
         tx_event: &mpsc::Sender<Result<ResponseEvent, ApiError>>,
-        reasoning_item: &mut Option<ResponseItem>,
-        assistant_item: &mut Option<ResponseItem>,
+        open_item: &mut Option<OpenItem>,
     ) {
-        if let Some(reasoning) = reasoning_item.take() {
-            let _ = tx_event
-                .send(Ok(ResponseEvent::OutputItemDone(reasoning)))
-                .await;
-        }
-
-        if let Some(assistant) = assistant_item.take() {
-            let _ = tx_event
-                .send(Ok(ResponseEvent::OutputItemDone(assistant)))
-                .await;
-        }
+        close_open_item(tx_event, open_item).await;
 
         let _ = tx_event
             .send(Ok(ResponseEvent::Completed {
@@ -124,7 +112,7 @@ pub async fn process_chat_sse<S>(
             }
             Ok(None) => {
                 if !completed_sent {
-                    flush_and_complete(&tx_event, &mut reasoning_item, &mut assistant_item).await;
+                    flush_and_complete(&tx_event, &mut open_item).await;
                 }
                 return;
             }
@@ -146,7 +134,7 @@ pub async fn process_chat_sse<S>(
 
         if data == "[DONE]" || data == "DONE" {
             if !completed_sent {
-                flush_and_complete(&tx_event, &mut reasoning_item, &mut assistant_item).await;
+                flush_and_complete(&tx_event, &mut open_item).await;
             }
             return;
         }
@@ -167,14 +155,11 @@ pub async fn process_chat_sse<S>(
             if let Some(delta) = choice.get("delta") {
                 if let Some(reasoning) = delta.get("reasoning") {
                     if let Some(text) = reasoning.as_str() {
-                        append_reasoning_text(&tx_event, &mut reasoning_item, text.to_string())
-                            .await;
+                        append_reasoning_text(&tx_event, &mut open_item, text.to_string()).await;
                     } else if let Some(text) = reasoning.get("text").and_then(|v| v.as_str()) {
-                        append_reasoning_text(&tx_event, &mut reasoning_item, text.to_string())
-                            .await;
+                        append_reasoning_text(&tx_event, &mut open_item, text.to_string()).await;
                     } else if let Some(text) = reasoning.get("content").and_then(|v| v.as_str()) {
-                        append_reasoning_text(&tx_event, &mut reasoning_item, text.to_string())
-                            .await;
+                        append_reasoning_text(&tx_event, &mut open_item, text.to_string()).await;
                     }
                 }
 
@@ -182,17 +167,12 @@ pub async fn process_chat_sse<S>(
                     if let Some(array) = content.as_array() {
                         for item in array {
                             if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                                append_assistant_text(
-                                    &tx_event,
-                                    &mut assistant_item,
-                                    text.to_string(),
-                                )
-                                .await;
+                                append_assistant_text(&tx_event, &mut open_item, text.to_string())
+                                    .await;
                             }
                         }
                     } else if let Some(text) = content.as_str() {
-                        append_assistant_text(&tx_event, &mut assistant_item, text.to_string())
-                            .await;
+                        append_assistant_text(&tx_event, &mut open_item, text.to_string()).await;
                     }
                 }
 
@@ -255,27 +235,17 @@ pub async fn process_chat_sse<S>(
                 && let Some(reasoning) = message.get("reasoning")
             {
                 if let Some(text) = reasoning.as_str() {
-                    append_reasoning_text(&tx_event, &mut reasoning_item, text.to_string()).await;
+                    append_reasoning_text(&tx_event, &mut open_item, text.to_string()).await;
                 } else if let Some(text) = reasoning.get("text").and_then(|v| v.as_str()) {
-                    append_reasoning_text(&tx_event, &mut reasoning_item, text.to_string()).await;
+                    append_reasoning_text(&tx_event, &mut open_item, text.to_string()).await;
                 } else if let Some(text) = reasoning.get("content").and_then(|v| v.as_str()) {
-                    append_reasoning_text(&tx_event, &mut reasoning_item, text.to_string()).await;
+                    append_reasoning_text(&tx_event, &mut open_item, text.to_string()).await;
                 }
             }
 
             let finish_reason = choice.get("finish_reason").and_then(|r| r.as_str());
             if finish_reason == Some("stop") {
-                if let Some(reasoning) = reasoning_item.take() {
-                    let _ = tx_event
-                        .send(Ok(ResponseEvent::OutputItemDone(reasoning)))
-                        .await;
-                }
-
-                if let Some(assistant) = assistant_item.take() {
-                    let _ = tx_event
-                        .send(Ok(ResponseEvent::OutputItemDone(assistant)))
-                        .await;
-                }
+                close_open_item(&tx_event, &mut open_item).await;
                 if !completed_sent {
                     let _ = tx_event
                         .send(Ok(ResponseEvent::Completed {
@@ -295,11 +265,9 @@ pub async fn process_chat_sse<S>(
             }
 
             if finish_reason == Some("tool_calls") {
-                if let Some(reasoning) = reasoning_item.take() {
-                    let _ = tx_event
-                        .send(Ok(ResponseEvent::OutputItemDone(reasoning)))
-                        .await;
-                }
+                // A model may stream prose or reasoning before its tool calls;
+                // close it so the function-call items are not paired against it.
+                close_open_item(&tx_event, &mut open_item).await;
 
                 for index in tool_call_order.drain(..) {
                     let Some(state) = tool_calls.remove(&index) else {
@@ -331,12 +299,52 @@ pub async fn process_chat_sse<S>(
     }
 }
 
+/// The single streamed item currently open.
+///
+/// [fraktal] The consumer tracks exactly one *active* item, established by
+/// `OutputItemAdded` and cleared by `OutputItemDone`. `OutputTextDelta`
+/// carries no item id, so a delta is only attributable while its item is the
+/// active one. Holding reasoning and assistant items open simultaneously
+/// therefore cannot work: closing either one clears the active slot out from
+/// under the other, and its subsequent deltas arrive with nothing active.
+/// Modelling the open item as one slot makes that impossible to express.
+enum OpenItem {
+    Reasoning(ResponseItem),
+    Assistant(ResponseItem),
+}
+
+impl OpenItem {
+    fn into_inner(self) -> ResponseItem {
+        match self {
+            Self::Reasoning(item) | Self::Assistant(item) => item,
+        }
+    }
+}
+
+/// Close the open item, if any, and clear the slot.
+async fn close_open_item(
+    tx_event: &mpsc::Sender<Result<ResponseEvent, ApiError>>,
+    open_item: &mut Option<OpenItem>,
+) {
+    if let Some(open) = open_item.take() {
+        let _ = tx_event
+            .send(Ok(ResponseEvent::OutputItemDone(open.into_inner())))
+            .await;
+    }
+}
+
 async fn append_assistant_text(
     tx_event: &mpsc::Sender<Result<ResponseEvent, ApiError>>,
-    assistant_item: &mut Option<ResponseItem>,
+    open_item: &mut Option<OpenItem>,
     text: String,
 ) {
-    if assistant_item.is_none() {
+    // Switching kind closes the previous item; re-opening after a close is
+    // what keeps every delta attributable to an active item.
+    if matches!(open_item, Some(OpenItem::Reasoning(_))) {
+        close_open_item(tx_event, open_item).await;
+    }
+
+    if open_item.is_none() {
         let item = ResponseItem::Message {
             id: None,
             role: "assistant".to_string(),
@@ -344,13 +352,13 @@ async fn append_assistant_text(
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         };
-        *assistant_item = Some(item.clone());
+        *open_item = Some(OpenItem::Assistant(item.clone()));
         let _ = tx_event
             .send(Ok(ResponseEvent::OutputItemAdded(item)))
             .await;
     }
 
-    if let Some(ResponseItem::Message { content, .. }) = assistant_item {
+    if let Some(OpenItem::Assistant(ResponseItem::Message { content, .. })) = open_item {
         content.push(ContentItem::OutputText { text: text.clone() });
         let _ = tx_event
             .send(Ok(ResponseEvent::OutputTextDelta(text.clone())))
@@ -360,10 +368,14 @@ async fn append_assistant_text(
 
 async fn append_reasoning_text(
     tx_event: &mpsc::Sender<Result<ResponseEvent, ApiError>>,
-    reasoning_item: &mut Option<ResponseItem>,
+    open_item: &mut Option<OpenItem>,
     text: String,
 ) {
-    if reasoning_item.is_none() {
+    if matches!(open_item, Some(OpenItem::Assistant(_))) {
+        close_open_item(tx_event, open_item).await;
+    }
+
+    if open_item.is_none() {
         let item = ResponseItem::Reasoning {
             // Chat Completions carries no item ids; upstream models this as `None`.
             id: None,
@@ -372,16 +384,16 @@ async fn append_reasoning_text(
             encrypted_content: None,
             internal_chat_message_metadata_passthrough: None,
         };
-        *reasoning_item = Some(item.clone());
+        *open_item = Some(OpenItem::Reasoning(item.clone()));
         let _ = tx_event
             .send(Ok(ResponseEvent::OutputItemAdded(item)))
             .await;
     }
 
-    if let Some(ResponseItem::Reasoning {
+    if let Some(OpenItem::Reasoning(ResponseItem::Reasoning {
         content: Some(content),
         ..
-    }) = reasoning_item
+    })) = open_item
     {
         let content_index = content.len() as i64;
         content.push(ReasoningItemContent::ReasoningText { text: text.clone() });
@@ -545,18 +557,118 @@ mod tests {
         let body = build_body(&[delta_content_and_tools, finish]);
         let events = collect_events(&body).await;
 
+        // Each item is closed before the next opens. The consumer keeps a
+        // single active item and `OutputTextDelta` carries no item id, so
+        // overlapping lifecycles silently misattribute deltas.
         assert_matches!(
             &events[..],
             [
                 ResponseEvent::OutputItemAdded(ResponseItem::Reasoning { .. }),
                 ResponseEvent::ReasoningContentDelta { .. },
+                ResponseEvent::OutputItemDone(ResponseItem::Reasoning { .. }),
                 ResponseEvent::OutputItemAdded(ResponseItem::Message { .. }),
                 ResponseEvent::OutputTextDelta(delta),
-                ResponseEvent::OutputItemDone(ResponseItem::Reasoning { .. }),
-                ResponseEvent::OutputItemDone(ResponseItem::FunctionCall { call_id, name, .. }),
                 ResponseEvent::OutputItemDone(ResponseItem::Message { .. }),
+                ResponseEvent::OutputItemDone(ResponseItem::FunctionCall { call_id, name, .. }),
                 ResponseEvent::Completed { .. }
             ] if delta == "hi" && call_id == "call_a" && name == "do_a"
+        );
+    }
+
+    /// Every `OutputTextDelta` must land while an assistant item is open.
+    ///
+    /// The consumer keeps a single active item and logs
+    /// "OutputTextDelta without active item" (dropping the delta) otherwise.
+    /// Returns the number of violations so callers can assert on it.
+    fn deltas_without_open_item(events: &[ResponseEvent]) -> usize {
+        let mut assistant_open = false;
+        let mut violations = 0;
+        for ev in events {
+            match ev {
+                ResponseEvent::OutputItemAdded(ResponseItem::Message { .. }) => {
+                    assistant_open = true;
+                }
+                ResponseEvent::OutputItemAdded(_) | ResponseEvent::OutputItemDone(_) => {
+                    assistant_open = false;
+                }
+                ResponseEvent::OutputTextDelta(_) if !assistant_open => violations += 1,
+                _ => {}
+            }
+        }
+        violations
+    }
+
+    /// [fraktal] Regression: reasoning and content interleaved across deltas.
+    ///
+    /// Reasoning-capable models (DeepSeek V4 Flash) alternate between
+    /// `reasoning` and `content` within one stream. Holding both items open at
+    /// once meant closing one cleared the active slot the other was still
+    /// streaming into, so its deltas were dropped.
+    #[tokio::test]
+    async fn interleaved_reasoning_and_content_keeps_an_item_open_for_every_delta() {
+        let events = collect_events(&build_body(&[
+            json!({ "choices": [{ "delta": { "reasoning": "think a" } }] }),
+            json!({ "choices": [{ "delta": { "content": "answer a" } }] }),
+            json!({ "choices": [{ "delta": { "reasoning": "think b" } }] }),
+            json!({ "choices": [{ "delta": { "content": "answer b" } }] }),
+            json!({ "choices": [{ "delta": { "content": "answer c" } }] }),
+            json!({ "choices": [{ "finish_reason": "stop" }] }),
+        ]))
+        .await;
+
+        assert_eq!(
+            deltas_without_open_item(&events),
+            0,
+            "text delta emitted with no open assistant item: {events:?}"
+        );
+
+        // Switching kind must close the previous item rather than leave it open.
+        let added = events
+            .iter()
+            .filter(|ev| matches!(ev, ResponseEvent::OutputItemAdded(_)))
+            .count();
+        let done = events
+            .iter()
+            .filter(|ev| matches!(ev, ResponseEvent::OutputItemDone(_)))
+            .count();
+        assert_eq!(added, done, "every opened item must be closed: {events:?}");
+    }
+
+    /// Prose streamed before tool calls must be closed before the calls land.
+    #[tokio::test]
+    async fn content_before_tool_calls_is_closed_before_function_items() {
+        let events = collect_events(&build_body(&[
+            json!({ "choices": [{ "delta": { "content": "let me check" } }] }),
+            json!({ "choices": [{ "delta": { "tool_calls": [{
+                "id": "call_a", "function": { "name": "do_a", "arguments": "{}" }
+            }] } }] }),
+            json!({ "choices": [{ "finish_reason": "tool_calls" }] }),
+        ]))
+        .await;
+
+        assert_eq!(deltas_without_open_item(&events), 0, "{events:?}");
+
+        let msg_done = events
+            .iter()
+            .position(|ev| {
+                matches!(
+                    ev,
+                    ResponseEvent::OutputItemDone(ResponseItem::Message { .. })
+                )
+            })
+            .expect("assistant message should be closed");
+        let call_done = events
+            .iter()
+            .position(|ev| {
+                matches!(
+                    ev,
+                    ResponseEvent::OutputItemDone(ResponseItem::FunctionCall { .. })
+                )
+            })
+            .expect("function call should be emitted");
+        assert!(
+            msg_done < call_done,
+            "message must close before the function call: {events:?}"
         );
     }
 
