@@ -49,10 +49,12 @@ context lives in `~/.claude/plans/crispy-singing-moth.md`.
   `cd codex-rs && cargo insta test --review -p codex-tui` (or
   `cargo insta accept` after confirming a diff). Until this lands,
   `cargo test -p codex-tui` fails for the affected tests.
-- [ ] **`--version` banner.** `fraktal --version` still prints
-  `codex-cli 0.0.0` because the Cargo package name is `codex-cli`.
-  Either rename the package (workspace-wide ripple) or override the
-  `version` clap attribute. Low priority.
+- [x] **`--version` banner.** Done: `clap` builds the version line from
+  `name`, which defaults to the crate name, so setting `name = "fraktal"`
+  in `codex-rs/cli/src/main.rs` fixes it without renaming the package.
+  `--help` now opens with "Fraktal CLI" too. The `exec` banner in
+  `codex-rs/exec/src/event_processor_with_human_output.rs` still says
+  "OpenAI Codex" — separate, and in a file with heavy upstream churn.
 - [ ] **npm wrapper rebrand of platform packages.** Patch 1 renamed
   `bin/fraktal.js` and the local binary lookup, but
   `codex-cli/scripts/build_npm_package.py` and the `@openai/codex-*`

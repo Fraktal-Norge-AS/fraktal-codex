@@ -116,6 +116,39 @@ Optional end-to-end checks when the helper + config are in place:
   `--features codex-otel/openai-telemetry` only if you intend to send to
   OpenAI.
 
+## CI
+
+`.github/workflows/fraktal-windows.yml` is the fork's only active workflow.
+It runs on pushes to `fraktal/main`, PRs targeting it, `fraktal-v*` tags, and
+manual dispatch. Two jobs, both on GitHub-hosted `windows-latest`:
+
+- **Lint and test** — `cargo fmt`, then clippy and `--lib` tests over exactly
+  the crates the fork patches.
+- **Build fraktal.exe** — release build, a smoke test asserting the binary
+  starts and reports the rebranded name, then uploads
+  `fraktal-x86_64-pc-windows-msvc` as an artifact (30-day retention).
+
+Things that will bite you if you change it:
+
+- **Never use `--workspace`.** It pulls in `code-mode-runtime` and `v8-poc`,
+  and the `v8` crate has no prebuilt archive for `x86_64-pc-windows-msvc`.
+  The crate list is explicit for this reason; regenerate it after a rebase
+  that touches new crates:
+  `git diff --name-only upstream/main..HEAD -- 'codex-rs/**' | sed 's#codex-rs/\([^/]*\)/.*#\1#' | sort -u`
+- **`RUST_MIN_STACK` is set workflow-wide.** Upstream's async tests overflow
+  the default thread stack on Windows and abort the whole test binary with
+  `STATUS_STACK_OVERFLOW`.
+- **`codex-tui` is linted but not tested**, pending the insta snapshot
+  regeneration in `FRAKTAL_TODO.md`. Add it to the test list once that lands.
+- Only the cargo registry is cached, not `target/`. A release `target/` for
+  this workspace is far larger than the 10 GB repo cache budget, so caching it
+  would thrash. Expect roughly an hour for the build job.
+
+Upstream's `blocking-ci` family stays gated off. It fans out to Bazel, the
+SDK, cargo-deny and a multi-platform matrix that need secrets and self-hosted
+runner groups this fork does not have — and it only triggers on `main`, not
+`fraktal/main`.
+
 ## Publishing a release
 
 1. Pick the upstream tag you're tracking (upstream uses the `rust-v0.X.Y`
