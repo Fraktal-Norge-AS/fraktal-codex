@@ -26,11 +26,95 @@ modell.
 
 ---
 
+## Hurtigstart (Windows)
+
+Fra null til en kjørende agent mot DeepSeek via OpenRouter. Ingen bygging
+— vi publiserer et ferdig Windows-binær fra CI.
+
+**1. Last ned binæret.** Siste utgivelse ligger under
+[Releases](https://github.com/Fraktal-Norge-AS/fraktal-codex/releases/latest).
+
+```powershell
+$dest = "$env:LOCALAPPDATA\Programs\Fraktal"
+New-Item -ItemType Directory -Force -Path $dest | Out-Null
+Invoke-WebRequest `
+  -Uri "https://github.com/Fraktal-Norge-AS/fraktal-codex/releases/latest/download/fraktal.exe" `
+  -OutFile "$dest\fraktal.exe"
+
+# Legg katalogen varig på PATH for din bruker
+$user = [Environment]::GetEnvironmentVariable('Path', 'User')
+[Environment]::SetEnvironmentVariable('Path', "$user;$dest", 'User')
+```
+
+Åpne et **nytt** terminalvindu (PATH leses ved oppstart) og sjekk:
+
+```powershell
+fraktal --version        # fraktal 0.1.0
+```
+
+Vil du verifisere nedlastingen, ligger `fraktal.exe.sha256` ved siden av
+binæret i samme utgivelse:
+
+```powershell
+(Get-FileHash "$dest\fraktal.exe" -Algorithm SHA256).Hash.ToLower()
+```
+
+**2. Skaff en OpenRouter-nøkkel** på <https://openrouter.ai/keys>:
+
+```powershell
+[Environment]::SetEnvironmentVariable('OPENROUTER_API_KEY', 'sk-or-...', 'User')
+```
+
+**3. Konfigurer.** Opprett `%USERPROFILE%\.fraktal\config.toml`:
+
+```toml
+model_provider = "fraktal-openrouter"
+model = "deepseek/deepseek-v4-flash-0731"
+
+[model_providers.fraktal-openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+wire_api = "chat"                    # [fraktal] direkte Chat Completions
+requires_openai_auth = false
+env_key = "OPENROUTER_API_KEY"       # fra https://openrouter.ai/keys
+discover_models = true               # vis OpenRouters modeller i /model
+```
+
+> **Bruk det daterte model-slugget.** `deepseek/deepseek-v4-flash` peker på
+> den eldre **0423**-utgaven; `-0731` er nyere *og* billigere
+> ($0.09/$0.18 mot $0.14/$0.28 per mill. token). Fordi `discover_models`
+> er på, ser du hele OpenRouter-katalogen med `/model` i økten.
+
+**4. Kjør.**
+
+```powershell
+cd C:\sti\til\prosjektet
+fraktal                                       # interaktivt
+fraktal exec "hva gjør dette repoet?"         # engangs, ikke-interaktivt
+```
+
+Det er alt. `wire_api = "chat"` er nøkkelen: oppstrøms Codex snakker kun
+Responses-API-et, mens OpenRouter kun tilbyr Chat Completions — Fraktal har
+gjeninnført `chat`, så du slipper oversetter-proxy. Detaljer i
+[OpenRouter (direkte)](#openrouter-direkte).
+
+Videre: [Konfigurasjon](#konfigurasjon) for Azure og lokale modeller,
+[MCP-servere](#mcp-servere-med-lokale-modeller) for verktøy.
+
+---
+
 ## Status
 
 Forken er fersk og under oppbygging. Følgende fungerer i dag:
 
 - Binæret bygger og kjører som `fraktal` (ikke `codex`).
+- **Ferdig Windows-binær publiseres fra CI** på `fraktal-v*`-tagger, med
+  sjekksum. Se [Hurtigstart](#hurtigstart-windows).
+- **Innstillinger og tilstand ligger i `~/.fraktal`**, ikke `~/.codex`, så
+  Fraktal og en eventuell Codex-installasjon deler ikke tilstand.
+  `FRAKTAL_HOME` overstyrer; `CODEX_HOME` godtas som fallback.
+- **OpenRouter, DeepInfra og andre Chat Completions-tjenester treffes
+  direkte** — `wire_api = "chat"` er gjeninnført, uten oversetter-proxy.
 - Statsig-telemetri til OpenAI er slått av som standard.
 - Oppdateringssjekken peker mot vår egen GitHub Release.
 - **MCP-verktøy fungerer med lokale modeller** — tolerant navneoppslag
@@ -42,8 +126,10 @@ Følgende er planlagt, men ikke ferdig:
 - **`fraktal-auth`** — hjelpeprogrammet som henter Entra-tokener for
   Azure OpenAI-profilen. Skal ligge i eget repo
   (`Fraktal-Norge-AS/fraktal-auth`).
+- **macOS/Linux-binærer.** CI bygger foreløpig kun Windows. På andre
+  plattformer må du bygge fra kilde (se under).
 - **Installasjonspakker** — Homebrew-tap for macOS/Linux og signert MSI
-  for Windows. Inntil disse er på plass, må du bygge fra kilde.
+  for Windows. Inntil disse er på plass, laster du ned binæret manuelt.
 - **Standard `~/.fraktal/config.toml`** levert av installeren. Inntil
   videre må du legge inn konfigurasjonen selv (mal nedenfor).
 
