@@ -31,8 +31,56 @@ modell.
 Fra null til en kjørende agent mot DeepSeek via OpenRouter. Ingen bygging
 — vi publiserer et ferdig Windows-binær fra CI.
 
-**1. Last ned binæret.** Siste utgivelse ligger under
-[Releases](https://github.com/Fraktal-Norge-AS/fraktal-codex/releases/latest).
+Kjør oppsettsskriptet i PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Fraktal-Norge-AS/fraktal-codex/fraktal/main/or-setup.ps1 -OutFile or-setup.ps1
+.\or-setup.ps1
+```
+
+Skriptet spør etter OpenRouter-nøkkelen din (lag en på
+<https://openrouter.ai/keys>) og gjør resten: laster ned `fraktal.exe`,
+verifiserer sjekksummen, legger den på `PATH`, lagrer nøkkelen som
+brukervariabel, og skriver konfigurasjonen.
+
+Åpne så et **nytt** terminalvindu — `PATH` leses ved oppstart — og kjør:
+
+```powershell
+cd C:\sti\til\prosjektet
+fraktal                                       # interaktivt
+fraktal exec "hva gjør dette repoet?"         # engangs, ikke-interaktivt
+```
+
+Nyttige flagg:
+
+```powershell
+.\or-setup.ps1 -DryRun                             # vis hva som skjer, endre ingenting
+.\or-setup.ps1 -Model "deepseek/deepseek-v4-pro"   # annen modell
+.\or-setup.ps1 -ApiKey "sk-or-..."                 # ikke-interaktivt
+```
+
+> **Har du allerede en `config.toml`?** Skriptet rører den ikke. Det legger
+> til OpenRouter-provideren hvis den mangler (med backup først), og skriver
+> profilen `openrouter.config.toml` i stedet for å overstyre standardmodellen
+> din. Da starter du med `fraktal --profile openrouter`. Skriptet er trygt å
+> kjøre om igjen.
+
+> **Bruk det daterte model-slugget.** `deepseek/deepseek-v4-flash` peker på
+> den eldre **0423**-utgaven; `-0731` er nyere *og* billigere
+> ($0.09/$0.18 mot $0.14/$0.28 per mill. token). Fordi `discover_models`
+> er på, ser du hele OpenRouter-katalogen med `/model` i økten.
+
+`wire_api = "chat"` er nøkkelen som gjør dette mulig: oppstrøms Codex snakker
+kun Responses-API-et, mens OpenRouter kun tilbyr Chat Completions — Fraktal
+har gjeninnført `chat`, så du slipper oversetter-proxy. Detaljer i
+[OpenRouter (direkte)](#openrouter-direkte).
+
+<details>
+<summary>Manuelt oppsett (hvis du heller vil gjøre det selv)</summary>
+
+Last ned `fraktal.exe` fra
+[Releases](https://github.com/Fraktal-Norge-AS/fraktal-codex/releases/latest),
+legg katalogen på `PATH`, og sett nøkkelen:
 
 ```powershell
 $dest = "$env:LOCALAPPDATA\Programs\Fraktal"
@@ -41,31 +89,18 @@ Invoke-WebRequest `
   -Uri "https://github.com/Fraktal-Norge-AS/fraktal-codex/releases/latest/download/fraktal.exe" `
   -OutFile "$dest\fraktal.exe"
 
-# Legg katalogen varig på PATH for din bruker
 $user = [Environment]::GetEnvironmentVariable('Path', 'User')
 [Environment]::SetEnvironmentVariable('Path', "$user;$dest", 'User')
+[Environment]::SetEnvironmentVariable('OPENROUTER_API_KEY', 'sk-or-...', 'User')
 ```
 
-Åpne et **nytt** terminalvindu (PATH leses ved oppstart) og sjekk:
-
-```powershell
-fraktal --version        # fraktal 0.1.0
-```
-
-Vil du verifisere nedlastingen, ligger `fraktal.exe.sha256` ved siden av
-binæret i samme utgivelse:
+Sjekksummen ligger som `fraktal.exe.sha256` i samme utgivelse:
 
 ```powershell
 (Get-FileHash "$dest\fraktal.exe" -Algorithm SHA256).Hash.ToLower()
 ```
 
-**2. Skaff en OpenRouter-nøkkel** på <https://openrouter.ai/keys>:
-
-```powershell
-[Environment]::SetEnvironmentVariable('OPENROUTER_API_KEY', 'sk-or-...', 'User')
-```
-
-**3. Konfigurer.** Opprett `%USERPROFILE%\.fraktal\config.toml`:
+Opprett så `%USERPROFILE%\.fraktal\config.toml`:
 
 ```toml
 model_provider = "fraktal-openrouter"
@@ -80,23 +115,7 @@ env_key = "OPENROUTER_API_KEY"       # fra https://openrouter.ai/keys
 discover_models = true               # vis OpenRouters modeller i /model
 ```
 
-> **Bruk det daterte model-slugget.** `deepseek/deepseek-v4-flash` peker på
-> den eldre **0423**-utgaven; `-0731` er nyere *og* billigere
-> ($0.09/$0.18 mot $0.14/$0.28 per mill. token). Fordi `discover_models`
-> er på, ser du hele OpenRouter-katalogen med `/model` i økten.
-
-**4. Kjør.**
-
-```powershell
-cd C:\sti\til\prosjektet
-fraktal                                       # interaktivt
-fraktal exec "hva gjør dette repoet?"         # engangs, ikke-interaktivt
-```
-
-Det er alt. `wire_api = "chat"` er nøkkelen: oppstrøms Codex snakker kun
-Responses-API-et, mens OpenRouter kun tilbyr Chat Completions — Fraktal har
-gjeninnført `chat`, så du slipper oversetter-proxy. Detaljer i
-[OpenRouter (direkte)](#openrouter-direkte).
+</details>
 
 Videre: [Konfigurasjon](#konfigurasjon) for Azure og lokale modeller,
 [MCP-servere](#mcp-servere-med-lokale-modeller) for verktøy.
