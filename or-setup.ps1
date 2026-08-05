@@ -69,6 +69,8 @@ if ($DryRun) { Write-Warn 'DRY RUN — nothing will be downloaded, written, or c
 # --- 1. API key -------------------------------------------------------------
 Write-Step 'OpenRouter API key'
 
+$keptExistingKey = $false
+
 if (-not $ApiKey) {
     $existing = [Environment]::GetEnvironmentVariable('OPENROUTER_API_KEY', 'User')
     if ($existing) {
@@ -77,7 +79,7 @@ if (-not $ApiKey) {
         $reply = Read-Host "    OPENROUTER_API_KEY is already set (ends ...$tail). Replace it? [y/N]"
         if ($reply -notmatch '^(y|yes)$') {
             $ApiKey = $existing
-            Write-Skip 'Keeping the existing key.'
+            $keptExistingKey = $true
         }
     }
 }
@@ -97,7 +99,11 @@ if ($ApiKey -notmatch '^sk-or-') {
     Write-Warn "Key does not start with 'sk-or-'. Continuing, but double-check it."
 }
 
-if ($DryRun) {
+if ($keptExistingKey) {
+    # Already stored for this user; only the current session needs it.
+    if (-not $DryRun) { $env:OPENROUTER_API_KEY = $ApiKey }
+    Write-Skip 'Keeping the existing key; OPENROUTER_API_KEY left unchanged.'
+} elseif ($DryRun) {
     Write-Skip 'Would set OPENROUTER_API_KEY for the current user.'
 } else {
     [Environment]::SetEnvironmentVariable('OPENROUTER_API_KEY', $ApiKey, 'User')
@@ -128,11 +134,28 @@ if ($DryRun) {
 
         # Checksum is published beside the binary; treat a missing one as a
         # warning rather than a hard failure so an older release still installs.
+        #
+        # Read it via a file rather than Invoke-WebRequest's .Content: for a
+        # response PowerShell does not consider text, .Content is a Byte[], and
+        # `-split` over a Byte[] yields the first *byte* (53, i.e. ASCII '5')
+        # instead of the hash — a mismatch against a download that was fine.
+        $expected = $null
+        $tmpSum = "$tmp.sha256"
         try {
-            $expected = ((Invoke-WebRequest -Uri $ChecksumUrl -UseBasicParsing).Content -split '\s+')[0].ToLower()
+            Invoke-WebRequest -Uri $ChecksumUrl -OutFile $tmpSum -UseBasicParsing
+            $expected = ((Get-Content -Path $tmpSum -Raw) -split '\s+' |
+                         Where-Object { $_ })[0].ToLower()
         } catch {
-            $expected = $null
             Write-Warn 'No published checksum found; skipping verification.'
+        } finally {
+            if (Test-Path $tmpSum) { Remove-Item $tmpSum -Force -ErrorAction SilentlyContinue }
+        }
+
+        # Anything that is not a SHA-256 digest means we failed to parse, not
+        # that the download is bad. Say so instead of reporting a mismatch.
+        if ($expected -and $expected -notmatch '^[0-9a-f]{64}$') {
+            Write-Warn "Could not parse the published checksum ('$expected'); skipping verification."
+            $expected = $null
         }
 
         if ($expected) {
@@ -239,6 +262,17 @@ if ($DryRun) {
 } elseif (Test-Path $exePath) {
     $version = (& $exePath --version) 2>&1
     Write-Ok "$version"
+
+    # We append to PATH, so an earlier entry — a cargo-installed build, say —
+    # keeps winning and the freshly downloaded binary is never the one that
+    # runs. Silent shadowing is worse than a warning.
+    $resolved = Get-Command fraktal -ErrorAction SilentlyContinue
+    if ($resolved -and $resolved.Source -and
+        ($resolved.Source.TrimEnd('\') -ne $exePath.TrimEnd('\'))) {
+        Write-Warn "Another fraktal is earlier on PATH and will be used instead:"
+        Write-Warn "  $($resolved.Source)"
+        Write-Warn "Remove it, reorder PATH, or run $exePath directly."
+    }
 } else {
     Write-Warn 'fraktal.exe not found; skipping.'
 }
