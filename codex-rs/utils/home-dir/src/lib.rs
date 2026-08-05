@@ -13,6 +13,9 @@ pub const LEGACY_CODEX_HOME_ENV_VAR: &str = "CODEX_HOME";
 /// variable is set.
 const FRAKTAL_HOME_DIR_NAME: &str = ".fraktal";
 
+/// Upstream's directory name, kept only so the legacy home can be recognised.
+const LEGACY_CODEX_HOME_DIR_NAME: &str = ".codex";
+
 /// Returns the path to the Fraktal configuration directory, which can be
 /// specified by the `FRAKTAL_HOME` environment variable (or the legacy
 /// `CODEX_HOME`). If neither is set, defaults to `~/.fraktal`.
@@ -23,6 +26,21 @@ const FRAKTAL_HOME_DIR_NAME: &str = ".fraktal";
 ///   exists.
 pub fn find_codex_home() -> std::io::Result<AbsolutePathBuf> {
     find_codex_home_with(|name| std::env::var(name).ok())
+}
+
+/// The pre-fork default configuration directory, `~/.codex`.
+///
+/// [fraktal] Moving our home to `~/.fraktal` left the old directory sitting in
+/// the user's home. Project-local config discovery walks the ancestors of the
+/// cwd looking for a `.codex` folder, and skips only the *current* home — so
+/// on a machine that ever ran upstream Codex, launching Fraktal from the home
+/// directory silently picks `~/.codex/config.toml` up as a project layer.
+/// Callers use this to exclude it. Returns `None` when there is no home
+/// directory to resolve against.
+pub fn legacy_codex_home() -> Option<AbsolutePathBuf> {
+    let mut path = home_dir()?;
+    path.push(LEGACY_CODEX_HOME_DIR_NAME);
+    AbsolutePathBuf::from_absolute_path(path).ok()
 }
 
 /// Variable lookup is injected so precedence can be tested without mutating
@@ -222,6 +240,22 @@ mod tests {
         .expect("resolve home");
 
         assert_eq!(resolved, canonical(&legacy));
+    }
+
+    /// [fraktal] Config loading skips this directory so a leftover `~/.codex`
+    /// is not picked up as a project layer when running from the home dir.
+    #[test]
+    fn legacy_codex_home_points_at_dot_codex_in_the_home_dir() {
+        let legacy = super::legacy_codex_home().expect("legacy home");
+        let mut expected = home_dir().expect("home dir");
+        expected.push(".codex");
+        let expected = AbsolutePathBuf::from_absolute_path(expected).expect("absolute home");
+        assert_eq!(legacy, expected);
+
+        // It must not collide with the current home, or the skip would also
+        // discard the real configuration directory.
+        let current = find_codex_home_with(|_| None).expect("default home");
+        assert_ne!(legacy, current);
     }
 
     #[test]

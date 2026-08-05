@@ -1259,6 +1259,20 @@ async fn load_project_layers(
         if dot_codex_abs == codex_home_abs || dot_codex_normalized == codex_home_normalized {
             continue;
         }
+        // [fraktal] Our home moved to `~/.fraktal`, so the guard above no
+        // longer covers a leftover `~/.codex` from upstream Codex. Without
+        // this, launching from the home directory loads that directory as a
+        // project layer: its `model` key silently overrides the configured
+        // model, while `model_provider`/`model_providers` are rejected as
+        // unsupported project keys. A `.codex` folder inside an actual project
+        // is still honoured — only the one in the user's home is skipped.
+        if let Some(legacy_home) = codex_utils_home_dir::legacy_codex_home() {
+            let legacy_normalized =
+                normalize_path(legacy_home.as_path()).unwrap_or_else(|_| legacy_home.to_path_buf());
+            if dot_codex_abs == legacy_home || dot_codex_normalized == legacy_normalized {
+                continue;
+            }
+        }
         let config_file = dot_codex_abs.join(CONFIG_TOML_FILE);
         let config_file_uri = PathUri::from_abs_path(&config_file);
         match fs.read_file_text(&config_file_uri, /*sandbox*/ None).await {

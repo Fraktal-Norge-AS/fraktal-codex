@@ -2619,6 +2619,7 @@ dependencies = [
  "codex-network-proxy",
  "codex-protocol",
  "codex-utils-absolute-path",
+ "codex-utils-home-dir",
  "codex-utils-path",
  "codex-utils-path-uri",
  "core-foundation 0.9.4",
